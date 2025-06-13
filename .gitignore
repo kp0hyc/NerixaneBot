@@ -1,0 +1,7 @@
+.env
+gservice-account.json
+subscribers.json
+forward_map.json
+bot.log
+anon.session
+venv
