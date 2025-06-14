@@ -19,7 +19,7 @@ from telegram import (
     InlineKeyboardMarkup,
     Update,
 )
-from telegram.error import Forbidden, TimedOut
+from telegram.error import BadRequest, Forbidden, TimedOut
 from telegram.ext import (
     ApplicationBuilder,
     CallbackContext,
@@ -114,13 +114,36 @@ async def make_link_keyboard(orig_chat_id, orig_msg_id, bot):
         InlineKeyboardButton("🕹 Перейти к сообщению", url=link)
     ]])
 
+
+async def make_chat_invite_keyboard():
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🕹 Вступить в культ!", url="https://t.me/+pI3sHlc1ocY5ZTdi")
+    ]])
+    
+
 async def broadcast(orig_chat_id, orig_msg_id, bot):
     kb = await make_link_keyboard(orig_chat_id, orig_msg_id, bot)
+    join_chat = await make_chat_invite_keyboard()
 
     mention_list = []
     for subscriber_id in list(SUBSCRIBERS):
         print('Forwarding!')
         try:
+            member = await bot.get_chat_member(orig_chat_id, subscriber_id)
+            print(member)
+        except BadRequest:
+            print("Bad Requesst")
+            return
+        
+        try:
+            if member.status in ("left", "kicked"):
+                await bot.send_message(
+                    chat_id=subscriber_id,
+                    text="Рыжопеч опубликовала новое сообщение в чате, но вы должны быть его участником, чтобы видеть содержимое!",
+                    reply_markup=join_chat
+                )
+                continue
+
             fwd = await bot.copy_message(
                 chat_id=subscriber_id,
                 from_chat_id=orig_chat_id,
@@ -181,7 +204,6 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not user or user.id != TARGET_USER:
         return
-
     
     print('we got message!')
     print(msg)
@@ -223,7 +245,6 @@ async def subscribe(update: Update, context: CallbackContext):
     uid = user.id
     if uid in SUBSCRIBERS:
         try:
-            # test message
             await context.bot.send_message(
                 chat_id=uid,
                 text="🎉 Всё настроено, сообщения будут приходить сюда!"
@@ -339,7 +360,7 @@ def main():
 
     app = ApplicationBuilder().token(BOT_TOKEN).get_updates_read_timeout(30).get_updates_write_timeout(30).build()
     app.add_handler(
-        MessageHandler(filters.ALL & ~filters.COMMAND, handle_cocksize)
+        MessageHandler(filters.Chat(chat_id=ORIG_CHANNEL_ID) & ~filters.COMMAND, handle_cocksize)
     )
 
     app.add_handler(CommandHandler("notify",   subscribe))
@@ -347,7 +368,7 @@ def main():
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("start", warn_use_dm, filters=~filters.ChatType.PRIVATE))
     
-    @mc.on(events.MessageDeleted())
+    @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
     async def on_deleted(event):
         print("chat id: ", event.chat_id)
         for msg_id in event.deleted_ids:
@@ -355,7 +376,7 @@ def main():
         
         save_forward_map()
     
-    @mc.on(events.MessageEdited())
+    @mc.on(events.MessageEdited(chats=ORIG_CHANNEL_ID))
     async def on_edited(event):
         print("chat id: ", event.chat_id)
         orig_id   = event.chat_id
