@@ -1,5 +1,4 @@
 import asyncio
-import datetime
 import html
 import json
 import logging
@@ -301,7 +300,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     size = m.group(1)
-    ts   = datetime.datetime.utcnow().isoformat()
+    ts   = datetime.utcnow().isoformat()
 
     sheet.append_row(
         [ ts, float(size) ],
