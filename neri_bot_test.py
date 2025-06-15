@@ -467,14 +467,11 @@ async def update_all_messages(bot, user_id):
         if entry.get("has_media", False) and new_text == "":
             new_text = "Медиаконтент"
         has_media = entry.get("has_media", False) and is_original
+        if not is_original:
+            new_text = "Можете перейти к сообщению по ссылке"
 
 
         await edit_message(bot, sub_chat, sub_msg, orig_id, orig_msg, new_text, has_media)
-        
-        for i, (c, m, is_orig) in enumerate(forwards):
-            if c == sub_chat and m == sub_msg:
-                forwards[i] = (c, m, True)
-                break
 
     print(f"Update complete for user {user_id}")
 
