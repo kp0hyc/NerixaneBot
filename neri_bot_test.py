@@ -196,22 +196,29 @@ def add_ban_rule(sig: dict):
     save_banlist()
 
 def extract_media_signature(msg):
-    *_, media = (
-        ("animation", msg.animation),
-        ("video",     msg.video)
-    )
-    for kind, obj in (("animation", msg.animation), ("video", msg.video)):
-        if obj:
-            sig = {
-                "mime_type": obj.mime_type,
-                "duration":  obj.duration,
-                "width":     getattr(obj, "width", None),
-                "height":    getattr(obj, "height", None),
-                "file_size": obj.file_size,
-                "sha256":    None
-            }
-            return sig
-    return None
+    obj = None
+    if msg.photo:
+        obj = msg.photo[-1]
+    elif msg.animation:
+        obj = msg.animation
+    elif msg.video:
+        obj = msg.video
+    elif msg.document:
+        obj = msg.document
+
+    if not obj:
+        return None
+
+    return {
+        "file_unique_id": getattr(obj, "file_unique_id", None),
+        "mime_type":      getattr(obj, "mime_type",      None),
+        "duration":       getattr(obj, "duration",       None), 
+        "width":          getattr(obj, "width",          None),
+        "height":         getattr(obj, "height",         None),
+        "file_size":      getattr(obj, "file_size",      None),
+
+        "sha256":    None,
+    }
 
 async def compute_sha256(bot, file_id):
     bio = await bot.get_file(file_id)
@@ -231,6 +238,7 @@ async def is_banned_media(sig: dict, file_id, bot) -> bool:
             rule.get(k) is None or rule[k] == sig.get(k)
             for k in meta_keys
         ):
+            return True
             rule_hash = rule.get("sha256")
             if not rule_hash:
                 return True
@@ -335,7 +343,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if sig:
         file_id = (
-            (msg.animation or msg.video or msg.document).file_id
+            (msg.animation or msg.video or msg.document or (msg.photo[-1] if msg.photo else None)).file_id
         )
         
         if await is_banned_media(sig, file_id, context.bot):
@@ -345,10 +353,31 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     message_id=msg.message_id
                 )
             except:
-                await msg.reply_text(
-                    "@kronus915 Этот файл запрещён модератором и будет удалён."
-                )
+                print("failed to delete message")
                 pass 
+            
+            try:
+                await context.bot.ban_chat_member(update.effective_chat.id, user.id)
+            except BadRequest as e:
+                print(f"Failed to ban {user.id}: {e}")
+            
+            entry = {
+                "timestamp":    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                "chat_id":      update.effective_chat.id,
+                "user_id":      user.id,
+                "username":     user.username,
+                "first_name":   user.first_name,
+                "last_name":    user.last_name,
+                "file_unique_id": sig.get("file_unique_id"),
+                "mime_type":      sig.get("mime_type"),
+                "duration":       sig.get("duration"),
+                "width":          sig.get("width"),
+                "height":         sig.get("height"),
+                "file_size":      sig.get("file_size")
+            }
+            
+            print(entry)
+            
             return
     
     if msg.new_chat_members:
@@ -586,28 +615,36 @@ async def ban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text("⚠️ В этом сообщении нет видео, анимации или документа.")
         return
 
-    file = (
-        (reply.animation or reply.video or reply.document)
+
+    try:
+        await context.bot.delete_message(chat_id=reply.chat.id, message_id=reply.message_id)
+    except Exception:
+        pass
+
+    file_id = (
+        (reply.animation or reply.video or reply.document or (reply.photo[-1] if reply.photo else None)).file_id
     )
-    file_id = file.file_id
-    sig["file_unique_id"] = file.file_unique_id
     
     try:
         sig["sha256"] = await compute_sha256(context.bot, file_id)
     except Exception as e:
         print(f"Failed to hash file: {e}")
 
+    meta_keys = ["mime_type", "duration", "width", "height", "file_size"]
+    for rule in banlist:
+        if rule.get("file_unique_id") == sig["file_unique_id"]:
+            await msg.reply_text("ℹ️ Этот файл уже в банлисте (по уникальному ID).")
+            return
+        if all(
+            rule.get(k) is None or rule[k] == sig.get(k)
+            for k in meta_keys
+        ):
+            await msg.reply_text("ℹ️ Этот файл уже в банлисте (по метаданным).")
+            return
+
     add_ban_rule(sig)
 
-    try:
-        await context.bot.delete_message(
-            chat_id=reply.chat.id,
-            message_id=reply.message_id
-        )
-    except Exception as e:
-        print(f"Could not delete offending message: {e}")
-
-    lines = [f"{k}={v}" for k,v in sig.items() if v is not None]
+    lines = [f"{k}={v}" for k,v in sig.items() if v is not None and not k.startswith("_")]
     await msg.reply_text("✅ Добавил этот контент в банлист:\n" + "\n".join(lines))
 
 async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -630,7 +667,7 @@ async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     file_id = (
-        (reply.animation or reply.video or reply.document).file_id
+        (reply.animation or reply.video or reply.document or (reply.photo[-1] if reply.photo else None)).file_id
     )
 
     try:
@@ -676,8 +713,8 @@ def main():
     app.add_handler(CommandHandler("stop", unsubscribe))
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("start", warn_use_dm, filters=~filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("ban", ban_media, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("unban", unban_media, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("ban", ban_media))
+    app.add_handler(CommandHandler("unban", unban_media))
 
     @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
     async def on_deleted(event):
