@@ -573,31 +573,6 @@ async def ban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     msg  = update.effective_message
 
-    print("banning")
-
-    if not user or user.id not in MODERATORS:
-        return
-
-    print("moderator confirmed")
-
-    reply = msg.reply_to_message
-    if not reply:
-        await msg.reply_text("⚠️ Пожалуйста, ответьте на сообщение с видео или GIF, чтобы добавить его в банлист.")
-        return
-
-    sig = extract_media_signature(reply) 
-    if not sig:
-        await msg.reply_text("⚠️ В этом сообщении нет видео, анимации или документа.")
-        return
-
-    add_ban_rule(sig)
-    await msg.reply_text("✅ Добавил этот контент в банлист:\n" + 
-                         "\n".join(f"{k}={v}" for k,v in sig.items() if v is not None))
-
-async def ban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    msg  = update.effective_message
-
     if not user or user.id not in MODERATORS:
         return
 
@@ -611,9 +586,12 @@ async def ban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text("⚠️ В этом сообщении нет видео, анимации или документа.")
         return
 
-    file_id = (
-        (reply.animation or reply.video or reply.document).file_id
+    file = (
+        (reply.animation or reply.video or reply.document)
     )
+    file_id = file.file_id
+    sig["file_unique_id"] = file.file_unique_id
+    
     try:
         sig["sha256"] = await compute_sha256(context.bot, file_id)
     except Exception as e:
@@ -632,6 +610,58 @@ async def ban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [f"{k}={v}" for k,v in sig.items() if v is not None]
     await msg.reply_text("✅ Добавил этот контент в банлист:\n" + "\n".join(lines))
 
+async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MODERATORS:
+        return
+
+    reply = msg.reply_to_message
+    if not reply:
+        await msg.reply_text(
+            "⚠️ Ответьте на ранее заблокированное сообщение, чтобы убрать его из банлиста."
+        )
+        return
+
+    sig = extract_media_signature(reply)
+    if not sig:
+        await msg.reply_text("⚠️ В этом сообщении нет видео, анимации или документа.")
+        return
+    
+    file_id = (
+        (reply.animation or reply.video or reply.document).file_id
+    )
+
+    try:
+        sig["sha256"] = await compute_sha256(context.bot, file_id)
+    except:
+        pass
+
+    meta_keys = ["mime_type", "duration", "width", "height", "file_size"]
+    removed = 0
+    new_rules = []
+    for rule in banlist:
+        if rule.get("file_unique_id") and rule["file_unique_id"] == sig.get("file_unique_id"):
+            removed += 1
+            continue
+
+        if all(
+            rule.get(k) is None or rule[k] == sig.get(k)
+            for k in meta_keys
+        ):
+            removed += 1
+            continue
+        
+        new_rules.append(rule)
+
+    if removed:
+        banlist[:] = new_rules
+        save_banlist()
+        await msg.reply_text(f"✅ Удалено {removed} правил из банлиста.")
+    else:
+        await msg.reply_text("ℹ️ Не нашёл совпадающих правил в банлисте.")
+
 def main():
     mc = TelegramClient('anon', API_ID, API_HASH)
     
@@ -647,6 +677,7 @@ def main():
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("start", warn_use_dm, filters=~filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("ban", ban_media, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("unban", unban_media, filters=filters.ChatType.PRIVATE))
 
     @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
     async def on_deleted(event):
