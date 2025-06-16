@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import html
 import json
 import logging
@@ -56,10 +57,21 @@ sheet = gc.open_by_key(SPREADSHEET_ID).worksheet("Sheet1")
 
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit?usp=sharing"
 
+MODERATORS_FILE = "moderators.json"
 SUBSCRIBERS_FILE = "subscribers.json"
 FORWARD_MAP_FILE = "forward_map.json"
+BANLIST_FILE = "banlist.json"
 
 EDIT_TIMEOUT = timedelta(hours=48)
+
+def load_banlist():
+    global banlist
+    with open(BANLIST_FILE, "r", encoding="utf-8") as f:
+        banlist = json.load(f)
+
+def save_banlist():
+    with open(BANLIST_FILE, "w", encoding="utf-8") as f:
+        json.dump(banlist, f, ensure_ascii=False, indent=2)
 
 def save_forward_map():
     serializable = {}
@@ -114,6 +126,13 @@ def load_forward_map():
                 ]
             }
 
+def load_moderators():
+    try:
+        with open(MODERATORS_FILE, "r") as f:
+            return set(json.load(f))
+    except (IOError, ValueError):
+        return set()
+
 def load_subscribers():
     try:
         with open(SUBSCRIBERS_FILE, "r") as f:
@@ -127,8 +146,11 @@ def save_subscribers(subs: set):
 
 # initialize in-memory set
 SUBSCRIBERS = load_subscribers()
+MODERATORS = load_moderators()
 forward_map = {}
+banlist: list[dict] = []
 load_forward_map()
+load_banlist()
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -167,8 +189,61 @@ def is_original_keyboard(kb):
                 return True
 
     return False
-    
 
+def add_ban_rule(sig: dict):
+    rule = {k: v for k, v in sig.items() if v is not None}
+    banlist.append(rule)
+    save_banlist()
+
+def extract_media_signature(msg):
+    *_, media = (
+        ("animation", msg.animation),
+        ("video",     msg.video)
+    )
+    for kind, obj in (("animation", msg.animation), ("video", msg.video)):
+        if obj:
+            sig = {
+                "mime_type": obj.mime_type,
+                "duration":  obj.duration,
+                "width":     getattr(obj, "width", None),
+                "height":    getattr(obj, "height", None),
+                "file_size": obj.file_size,
+                "sha256":    None
+            }
+            return sig
+    return None
+
+async def compute_sha256(bot, file_id):
+    bio = await bot.get_file(file_id)
+    data = await bio.download_as_bytearray()
+    return hashlib.sha256(data).hexdigest()
+
+async def is_banned_media(sig: dict, file_id, bot) -> bool:
+    uid = sig.get("file_unique_id")
+    if uid:
+        for rule in banlist:
+            if rule.get("file_unique_id") == uid:
+                return True
+
+    meta_keys = ["mime_type", "duration", "width", "height", "file_size"]
+    for rule in banlist:
+        if all(
+            rule.get(k) is None or rule[k] == sig.get(k)
+            for k in meta_keys
+        ):
+            rule_hash = rule.get("sha256")
+            if not rule_hash:
+                return True
+            
+            try:
+                sig["sha256"] = await compute_sha256(bot, file_id)
+            except:
+                return True
+
+            return sig["sha256"] == rule_hash
+
+    return False
+    
 async def broadcast(orig_chat_id, orig_msg_id, text, has_media, bot):
     kb = await make_link_keyboard(orig_chat_id, orig_msg_id, bot)
     join_chat = await make_chat_invite_keyboard()
@@ -256,6 +331,26 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg:
         return
     
+    sig = extract_media_signature(msg)
+    
+    if sig:
+        file_id = (
+            (msg.animation or msg.video or msg.document).file_id
+        )
+        
+        if await is_banned_media(sig, file_id, context.bot):
+            try:
+                await context.bot.delete_message(
+                    chat_id=update.effective_chat.id,
+                    message_id=msg.message_id
+                )
+            except:
+                await msg.reply_text(
+                    "@kronus915 Этот файл запрещён модератором и будет удалён."
+                )
+                pass 
+            return
+    
     if msg.new_chat_members:
         for member in msg.new_chat_members:
             user_id = member.id
@@ -300,7 +395,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     size = m.group(1)
-    ts   = datetime.utcnow().isoformat()
+    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
     sheet.append_row(
         [ ts, float(size) ],
@@ -474,18 +569,68 @@ async def update_all_messages(bot, user_id):
 
     print(f"Update complete for user {user_id}")
 
-async def get_chat_owner_id(chat_id: int, context):
-    print('hello world')
-    admins = await context.bot.get_chat_administrators(chat_id)
-    print(len(admins))
-    for member in admins:
-        print('member: ', member.user.id)
-        print(member.status)
-        print(member.user.first_name)
-        print(member.user.last_name)
-        print(member.user.username)
-        if member.status == 'creator':
-            print('creator: ', member.user.id)
+async def ban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    print("banning")
+
+    if not user or user.id not in MODERATORS:
+        return
+
+    print("moderator confirmed")
+
+    reply = msg.reply_to_message
+    if not reply:
+        await msg.reply_text("⚠️ Пожалуйста, ответьте на сообщение с видео или GIF, чтобы добавить его в банлист.")
+        return
+
+    sig = extract_media_signature(reply) 
+    if not sig:
+        await msg.reply_text("⚠️ В этом сообщении нет видео, анимации или документа.")
+        return
+
+    add_ban_rule(sig)
+    await msg.reply_text("✅ Добавил этот контент в банлист:\n" + 
+                         "\n".join(f"{k}={v}" for k,v in sig.items() if v is not None))
+
+async def ban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MODERATORS:
+        return
+
+    reply = msg.reply_to_message
+    if not reply:
+        await msg.reply_text("⚠️ Ответьте на сообщение с видео/GIF/файлом, чтобы добавить его в банлист.")
+        return
+
+    sig = extract_media_signature(reply)
+    if not sig:
+        await msg.reply_text("⚠️ В этом сообщении нет видео, анимации или документа.")
+        return
+
+    file_id = (
+        (reply.animation or reply.video or reply.document).file_id
+    )
+    try:
+        sig["sha256"] = await compute_sha256(context.bot, file_id)
+    except Exception as e:
+        print(f"Failed to hash file: {e}")
+
+    add_ban_rule(sig)
+
+    try:
+        await context.bot.delete_message(
+            chat_id=reply.chat.id,
+            message_id=reply.message_id
+        )
+    except Exception as e:
+        print(f"Could not delete offending message: {e}")
+
+    lines = [f"{k}={v}" for k,v in sig.items() if v is not None]
+    await msg.reply_text("✅ Добавил этот контент в банлист:\n" + "\n".join(lines))
 
 def main():
     mc = TelegramClient('anon', API_ID, API_HASH)
@@ -501,6 +646,7 @@ def main():
     app.add_handler(CommandHandler("stop", unsubscribe))
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("start", warn_use_dm, filters=~filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("ban", ban_media, filters=filters.ChatType.PRIVATE))
 
     @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
     async def on_deleted(event):
