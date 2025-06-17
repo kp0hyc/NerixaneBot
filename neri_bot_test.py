@@ -70,11 +70,12 @@ FORWARD_MAP_FILE = "forward_map.json"
 BANLIST_FILE = "banlist.json"
 STATS_FILE = "message_stats.json"
 DAILY_STATS_DIR = Path("daily_stats")
+LAST_SIZES_FILE = "last_sizes.json"
 DAILY_STATS_DIR.mkdir(exist_ok=True)
 
 TYUMEN = ZoneInfo("Asia/Yekaterinburg")
 EDIT_TIMEOUT = timedelta(hours=48)
-PAGE_SIZE = 5
+PAGE_SIZE = 10
 
 def _daily_path_for(date_obj: datetime.date) -> Path:
     return DAILY_STATS_DIR / f"daily_stats_{date_obj.isoformat()}.json"
@@ -111,6 +112,26 @@ def save_daily_stats():
     path.write_text(
         json.dumps(daily_stats, ensure_ascii=False, indent=2)
     )
+
+def load_last_sizes():
+    global last_sizes
+    try:
+        with open(LAST_SIZES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            last_sizes = {
+                int(uid): {"size": float(v["size"]), "ts": v["ts"]}
+                for uid, v in data.items()
+            }
+    except (FileNotFoundError, json.JSONDecodeError):
+        last_sizes = {}
+
+def save_last_sizes():
+    to_dump = {
+        str(uid): {"size": info["size"], "ts": info["ts"]}
+        for uid, info in last_sizes.items()
+    }
+    with open(LAST_SIZES_FILE, "w", encoding="utf-8") as f:
+        json.dump(to_dump, f, ensure_ascii=False, indent=2)
 
 def load_banlist():
     global banlist
@@ -200,9 +221,11 @@ banlist: list[dict] = []
 message_stats: dict[int, int] = {}
 daily_stats:  dict[int,int] = {}
 stats_sessions: dict[int, int] = {}
+last_sizes: dict[int, dict] = {}
 load_forward_map()
 load_banlist()
 load_stats()
+load_last_sizes()
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -219,42 +242,72 @@ def reset_daily(context: ContextTypes.DEFAULT_TYPE):
     print(f"Rotated daily stats: {yesterday} → {ypath.name}")
 
 async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, InlineKeyboardMarkup]:
-    stats = message_stats if mode == "global" else daily_stats
-    mode_ru = "глобально" if mode == "global" else "сегодня"
+    if mode == "global":
+        stats = message_stats.items()
+        sort_key = lambda kv: kv[1]
+        mode_ru = "глобально"
+        total = len(message_stats)
+    elif mode == "daily":
+        stats = daily_stats.items()
+        sort_key = lambda kv: kv[1]
+        mode_ru = "сегодня"
+        total = len(daily_stats)
+    else:  # "cock"
+        stats = ((uid, info["size"]) for uid, info in last_sizes.items())
+        sort_key = lambda kv: kv[1]
+        mode_ru = "по размеру"
+        total = len(last_sizes)
 
-    items = sorted(stats.items(), key=lambda kv: kv[1], reverse=True)
-    total = len(items)
+    sorted_stats = sorted(stats, key=sort_key, reverse=True)
     start, end = page * PAGE_SIZE, (page + 1) * PAGE_SIZE
-    chunk = items[start:end]
+    chunk = sorted_stats[start:end]
 
-    lines = [f"📊 Топ ({mode_ru.capitalize()}) #{start+1}–{min(end,total)} из {total}:\n"]
-
-    for rank,(uid,count) in enumerate(chunk, start=start+1):
+    header = f"📊 Топ ({mode_ru.capitalize()}) #{start+1}–{min(end, total)} из {total}:\n"
+    lines = [header]
+    for rank, (uid, count) in enumerate(chunk, start=start+1):
         try:
-            user_chat = await bot.get_chat(uid)
-            if user_chat.first_name or user_chat.last_name:
-                name = " ".join(filter(None,[user_chat.first_name, user_chat.last_name]))
-            elif user_chat.username:
-                name = f"{user_chat.username}"
+            uc = await bot.get_chat(uid)
+            if uc.first_name or uc.last_name:
+                name = " ".join(filter(None, [uc.first_name, uc.last_name]))
+            elif uc.username:
+                name = f"@{uc.username}"
             else:
                 name = str(uid)
-        except Exception:
+        except:
             name = str(uid)
 
-        lines.append(f"{rank}. {html.escape(name)}: {count} сообщений")
+        if mode == "cock":
+            size = float(count)
+            lines.append(f"{rank}. {html.escape(name)}: {size:.1f} см")
+        else:
+            lines.append(f"{rank}. {html.escape(name)}: {count} сообщений")
 
     text = "\n".join(lines)
 
-    buttons = []
-    if page > 0:
-        buttons.append(InlineKeyboardButton("◀️ Предыдущая", callback_data=f"stats:{mode}:{page-1}"))
-    other = "daily" if mode == "global" else "global"
-    other_ru = "сегодня" if mode == "global" else "глобально"
-    buttons.append(InlineKeyboardButton(f"📊 {other_ru.capitalize()}", callback_data=f"stats:{other}:0"))
-    if end < total:
-        buttons.append(InlineKeyboardButton("Следующая ▶️", callback_data=f"stats:{mode}:{page+1}"))
+    modes = [
+        ("global",  "🌐 Всё"),
+        ("daily",   "📅 Сегодня"),
+        ("cock",    "🍆 Размер"),
+    ]
+    mode_buttons = [
+        InlineKeyboardButton(
+            label,
+            callback_data=f"stats:{m}:0"
+        )
+        for m, label in modes
+    ]
 
-    kb = InlineKeyboardMarkup([buttons])
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton("◀️ Предыдущая", callback_data=f"stats:{mode}:{page-1}")
+        )
+    if end < total:
+        nav_buttons.append(
+            InlineKeyboardButton("Следующая ▶️", callback_data=f"stats:{mode}:{page+1}")
+        )
+
+    kb = InlineKeyboardMarkup([mode_buttons, nav_buttons])
     return text, kb
 
 async def stats_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -513,6 +566,17 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_stats[user.id] = message_stats.get(user.id, 0) + 1
     daily_stats[user.id] = daily_stats.get(user.id, 0) + 1
     
+    if update.message and update.message.text:
+        cock_text = update.message.text or ""
+        m = re.search(r"(\d+(?:\.\d+)?)\s*cm", cock_text, re.IGNORECASE)
+        if not m:
+            return
+
+        size = m.group(1)
+        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        last_sizes[user.id] = {"size": size, "ts": ts}
+        save_last_sizes()
+    
     if user.id != TARGET_USER:
         return
     
@@ -540,8 +604,8 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not (via and via.username == COCKBOT_USERNAME):
         return
 
-    text = update.message.text or ""
-    m = re.search(r"(\d+(?:\.\d+)?)\s*cm", text, re.IGNORECASE)
+    cock_text = update.message.text or ""
+    m = re.search(r"(\d+(?:\.\d+)?)\s*cm", cock_text, re.IGNORECASE)
     if not m:
         return
 
@@ -866,7 +930,7 @@ def main():
     app.add_handler(CommandHandler("unban", unban_media))
     app.add_handler(CommandHandler("shutdown", shutdown_bot))
     app.add_handler(CommandHandler("top", top_command))
-    app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily):\d+$"))
+    app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|cock):\d+$"))
 
     @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
     async def on_deleted(event):
