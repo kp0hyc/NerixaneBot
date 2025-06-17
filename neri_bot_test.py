@@ -566,16 +566,19 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_stats[user.id] = message_stats.get(user.id, 0) + 1
     daily_stats[user.id] = daily_stats.get(user.id, 0) + 1
     
-    if update.message and update.message.text:
-        cock_text = update.message.text or ""
-        m = re.search(r"(\d+(?:\.\d+)?)\s*cm", cock_text, re.IGNORECASE)
-        if not m:
-            return
+    via = update.message.via_bot
+    if (via and via.username == COCKBOT_USERNAME):
+        if update.message and update.message.text:
+            cock_text = update.message.text or ""
+            m = re.search(r"(\d+(?:\.\d+)?)\s*cm", cock_text, re.IGNORECASE)
+            if m:
+                size = float(m.group(1))
+                ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                last_sizes[user.id] = {"size": size, "ts": ts}
+                save_last_sizes()
 
-        size = m.group(1)
-        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        last_sizes[user.id] = {"size": size, "ts": ts}
-        save_last_sizes()
+            
+    
     
     if user.id != TARGET_USER:
         return
