@@ -5,13 +5,17 @@ import json
 import logging
 import os
 import re
+import sys
 
 from dotenv import load_dotenv
 
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
+from zoneinfo import ZoneInfo
+
+from pathlib import Path
 
 from telethon import TelegramClient, events, types
 from telethon.tl.types import ChannelParticipantsAdmins
@@ -26,6 +30,7 @@ from telegram.error import BadRequest, Forbidden, TimedOut
 from telegram.ext import (
     ApplicationBuilder,
     CallbackContext,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -55,14 +60,57 @@ creds = ServiceAccountCredentials.from_json_keyfile_name(
 gc = gspread.authorize(creds)
 sheet = gc.open_by_key(SPREADSHEET_ID).worksheet("Sheet1")
 
+mc: TelegramClient
+
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit?usp=sharing"
 
 MODERATORS_FILE = "moderators.json"
 SUBSCRIBERS_FILE = "subscribers.json"
 FORWARD_MAP_FILE = "forward_map.json"
 BANLIST_FILE = "banlist.json"
+STATS_FILE = "message_stats.json"
+DAILY_STATS_DIR = Path("daily_stats")
+DAILY_STATS_DIR.mkdir(exist_ok=True)
 
+TYUMEN = ZoneInfo("Asia/Yekaterinburg")
 EDIT_TIMEOUT = timedelta(hours=48)
+PAGE_SIZE = 5
+
+def _daily_path_for(date_obj: datetime.date) -> Path:
+    return DAILY_STATS_DIR / f"daily_stats_{date_obj.isoformat()}.json"
+
+def load_stats():
+    global message_stats, daily_stats
+
+    try:
+        with open(STATS_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+            message_stats = {int(k): int(v) for k, v in raw.items()}
+    except (FileNotFoundError, json.JSONDecodeError):
+        message_stats = {}
+
+    today = datetime.now(TYUMEN).date()
+    today_path = _daily_path_for(today)
+    if today_path.exists():
+        try:
+            with open(today_path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+                daily_stats = {int(k): int(v) for k, v in raw.items()}
+        except (json.JSONDecodeError, IOError):
+            daily_stats = {}
+    else:
+        daily_stats = {}
+
+def save_stats():
+    with open(STATS_FILE, "w", encoding="utf-8") as f:
+        json.dump(message_stats, f, ensure_ascii=False, indent=2)
+
+def save_daily_stats():
+    today = datetime.now(TYUMEN).date()
+    path = _daily_path_for(today)
+    path.write_text(
+        json.dumps(daily_stats, ensure_ascii=False, indent=2)
+    )
 
 def load_banlist():
     global banlist
@@ -149,13 +197,79 @@ SUBSCRIBERS = load_subscribers()
 MODERATORS = load_moderators()
 forward_map = {}
 banlist: list[dict] = []
+message_stats: dict[int, int] = {}
+daily_stats:  dict[int,int] = {}
 load_forward_map()
 load_banlist()
+load_stats()
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
+
+def reset_daily(context: ContextTypes.DEFAULT_TYPE):
+    yesterday = (datetime.now(MOSCOW) - timedelta(days=1)).date()
+    ypath = _daily_path_for(yesterday)
+    if daily_stats:
+        ypath.write_text(json.dumps(daily_stats, ensure_ascii=False, indent=2))
+    daily_stats.clear()
+    save_daily_stats()
+    print(f"Rotated daily stats: {yesterday} → {ypath.name}")
+
+async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, InlineKeyboardMarkup]:
+    stats = message_stats if mode == "global" else daily_stats
+    mode_ru = "глобально" if mode == "global" else "сегодня"
+
+    items = sorted(stats.items(), key=lambda kv: kv[1], reverse=True)
+    total = len(items)
+    start, end = page * PAGE_SIZE, (page + 1) * PAGE_SIZE
+    chunk = items[start:end]
+
+    lines = [f"📊 Топ ({mode_ru.capitalize()}) #{start+1}–{min(end,total)} из {total}:\n"]
+
+    for rank,(uid,count) in enumerate(chunk, start=start+1):
+        try:
+            user_chat = await bot.get_chat(uid)
+            if user_chat.first_name or user_chat.last_name:
+                name = " ".join(filter(None,[user_chat.first_name, user_chat.last_name]))
+            elif user_chat.username:
+                name = f"{user_chat.username}"
+            else:
+                name = str(uid)
+        except Exception:
+            name = str(uid)
+
+        lines.append(f"{rank}. {html.escape(name)}: {count} сообщений")
+
+    text = "\n".join(lines)
+
+    buttons = []
+    if page > 0:
+        buttons.append(InlineKeyboardButton("◀️ Предыдущая", callback_data=f"stats:{mode}:{page-1}"))
+    other = "daily" if mode == "global" else "global"
+    other_ru = "сегодня" if mode == "global" else "глобально"
+    buttons.append(InlineKeyboardButton(f"📊 {other_ru.capitalize()}", callback_data=f"stats:{other}:0"))
+    if end < total:
+        buttons.append(InlineKeyboardButton("Следующая ▶️", callback_data=f"stats:{mode}:{page+1}"))
+
+    kb = InlineKeyboardMarkup([buttons])
+    return text, kb
+
+
+async def stats_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    _, mode, page_str = q.data.split(":")
+    page = int(page_str)
+
+    text, kb = await build_stats_page_async(mode, page, context.bot)
+    await q.edit_message_text(
+        text=text,
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
 
 async def make_link_keyboard(orig_chat_id, orig_msg_id, bot):
     chat = await bot.get_chat(orig_chat_id)
@@ -387,11 +501,18 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if user_id in SUBSCRIBERS:
                 await update_all_messages(context.bot, user_id)
     
+    
     if not msg.from_user:
         return
     print(update)
     
-    if not user or user.id != TARGET_USER:
+    if not user:
+        return
+
+    message_stats[user.id] = message_stats.get(user.id, 0) + 1
+    daily_stats[user.id] = daily_stats.get(user.id, 0) + 1
+    
+    if user.id != TARGET_USER:
         return
     
     print('we got message!')
@@ -699,6 +820,32 @@ async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await msg.reply_text("ℹ️ Не нашёл совпадающих правил в банлисте.")
 
+async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text, kb = await build_stats_page_async("global", 0, context.bot)
+    await update.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
+
+async def shutdown_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user or user.id not in MODERATORS:
+        return
+
+    await update.message.reply_text("🔌 Shutting down, saving stats…")
+
+    save_stats()
+    save_daily_stats()
+
+    sys.exit(0)
+
+def persist_stats(context: ContextTypes.DEFAULT_TYPE):
+    save_stats()
+    save_daily_stats()
+    print("Message stats saved.")
+
 def main():
     mc = TelegramClient('anon', API_ID, API_HASH)
     
@@ -715,6 +862,9 @@ def main():
     app.add_handler(CommandHandler("start", warn_use_dm, filters=~filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("ban", ban_media))
     app.add_handler(CommandHandler("unban", unban_media))
+    app.add_handler(CommandHandler("shutdown", shutdown_bot))
+    app.add_handler(CommandHandler("top", top_command))
+    app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily):\d+$"))
 
     @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
     async def on_deleted(event):
@@ -731,7 +881,19 @@ def main():
         orig_msg  = event.message.id
         await edit_forwards(app.bot, event, orig_id, orig_msg)
 
+    app.job_queue.run_repeating(
+        persist_stats,
+        interval=300,
+        first=300 
+    )
+    
+    app.job_queue.run_daily(
+        reset_daily,
+        time=time(hour=0, minute=0, tzinfo=TYUMEN)
+    )
+
     app.run_polling(timeout=30)
+    print("exiting")
 
 if __name__ == "__main__":
     main()
