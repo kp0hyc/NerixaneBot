@@ -4,6 +4,7 @@ import html
 import json
 import logging
 import os
+import random
 import re
 import sys
 
@@ -78,6 +79,15 @@ DAILY_STATS_DIR.mkdir(exist_ok=True)
 TYUMEN = ZoneInfo("Asia/Yekaterinburg")
 EDIT_TIMEOUT = timedelta(hours=48)
 PAGE_SIZE = 10
+
+TARGET_NICKS = [
+    "Рыжая голова",
+    "Рыжопеч",
+    "Принцесса рунета",
+    "Яся",
+    "Рыжейшество",
+    "Яр!%#"
+]
 
 def _daily_path_for(date_obj: datetime.date) -> Path:
     return DAILY_STATS_DIR / f"daily_stats_{date_obj.isoformat()}.json"
@@ -245,7 +255,8 @@ def reset_daily(context: ContextTypes.DEFAULT_TYPE):
 
 def parse_name(uc):
     if uc.id == TARGET_USER:
-        return f"👑<b>Рыжая башка</b>👑"
+        nick = random.choice(TARGET_NICKS)
+        return f"👑<b>{escape(nick)}</b>"
     if uc.first_name or uc.last_name:
         return escape(" ".join(filter(None, [uc.first_name, uc.last_name])))
     if uc.username:
