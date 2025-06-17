@@ -17,6 +17,8 @@ from zoneinfo import ZoneInfo
 
 from pathlib import Path
 
+from html import escape
+
 from telethon import TelegramClient, events, types
 from telethon.tl.types import ChannelParticipantsAdmins
 
@@ -241,6 +243,15 @@ def reset_daily(context: ContextTypes.DEFAULT_TYPE):
     save_daily_stats()
     print(f"Rotated daily stats: {yesterday} → {ypath.name}")
 
+def parse_name(uc):
+    if uc.id == TARGET_USER:
+        return f"👑<b>Рыжая башка</b>👑"
+    if uc.first_name or uc.last_name:
+        return escape(" ".join(filter(None, [uc.first_name, uc.last_name])))
+    if uc.username:
+        return escape(f"@{uc.username}")
+    return escape(str(uid))
+
 async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, InlineKeyboardMarkup]:
     if mode == "global":
         stats = message_stats.items()
@@ -267,20 +278,15 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
     for rank, (uid, count) in enumerate(chunk, start=start+1):
         try:
             uc = await bot.get_chat(uid)
-            if uc.first_name or uc.last_name:
-                name = " ".join(filter(None, [uc.first_name, uc.last_name]))
-            elif uc.username:
-                name = f"@{uc.username}"
-            else:
-                name = str(uid)
+            name = parse_name(uc)
         except:
-            name = str(uid)
+            name = escape(str(uid))
 
         if mode == "cock":
             size = float(count)
-            lines.append(f"{rank}. {html.escape(name)}: {size:.1f} см")
+            lines.append(f"{rank}. {name}: {size:.1f} см")
         else:
-            lines.append(f"{rank}. {html.escape(name)}: {count} сообщений")
+            lines.append(f"{rank}. {name}: {count} сообщений")
 
     text = "\n".join(lines)
 
@@ -315,9 +321,9 @@ async def stats_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await q.answer()
 
     msg = q.message
-    owner_id = stats_sessions.get(msg.message_id)
-    if owner_id is None or q.from_user.id != owner_id:
-        return await q.answer("⛔ Только автор сообщения может навигировать.", show_alert=True)
+    #owner_id = stats_sessions.get(msg.message_id)
+    #if owner_id is None or q.from_user.id != owner_id:
+    #    return await q.answer("⛔ Только автор сообщения может навигировать.", show_alert=True)
 
     _, mode, page_str = q.data.split(":")
     page = int(page_str)
