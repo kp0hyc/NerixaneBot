@@ -199,6 +199,7 @@ forward_map = {}
 banlist: list[dict] = []
 message_stats: dict[int, int] = {}
 daily_stats:  dict[int,int] = {}
+stats_sessions: dict[int, int] = {}
 load_forward_map()
 load_banlist()
 load_stats()
@@ -256,19 +257,19 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
     kb = InlineKeyboardMarkup([buttons])
     return text, kb
 
-
 async def stats_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+
+    msg = q.message
+    owner_id = stats_sessions.get(msg.message_id)
+    if owner_id is None or q.from_user.id != owner_id:
+        return await q.answer("⛔ Только автор сообщения может навигировать.", show_alert=True)
+
     _, mode, page_str = q.data.split(":")
     page = int(page_str)
-
     text, kb = await build_stats_page_async(mode, page, context.bot)
-    await q.edit_message_text(
-        text=text,
-        parse_mode="HTML",
-        reply_markup=kb
-    )
+    await q.edit_message_text(text=text, parse_mode="HTML", reply_markup=kb)
 
 
 async def make_link_keyboard(orig_chat_id, orig_msg_id, bot):
@@ -822,11 +823,12 @@ async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text, kb = await build_stats_page_async("global", 0, context.bot)
-    await update.message.reply_text(
+    sent = await update.message.reply_text(
         text,
         parse_mode="HTML",
         reply_markup=kb
     )
+    stats_sessions[sent.message_id] = update.effective_user.id
 
 
 async def shutdown_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
