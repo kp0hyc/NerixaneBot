@@ -245,7 +245,7 @@ logging.basicConfig(
 )
 
 def reset_daily(context: ContextTypes.DEFAULT_TYPE):
-    yesterday = (datetime.now(MOSCOW) - timedelta(days=1)).date()
+    yesterday = (datetime.now(TYUMEN) - timedelta(days=1)).date()
     ypath = _daily_path_for(yesterday)
     if daily_stats:
         ypath.write_text(json.dumps(daily_stats, ensure_ascii=False, indent=2))
@@ -410,12 +410,12 @@ async def compute_sha256(bot, file_id):
     data = await bio.download_as_bytearray()
     return hashlib.sha256(data).hexdigest()
 
-async def is_banned_media(sig: dict, file_id, bot) -> bool:
+async def is_banned_media(sig: dict, file_id, bot) -> (bool, bool):
     uid = sig.get("file_unique_id")
     if uid:
         for rule in banlist:
             if rule.get("file_unique_id") == uid:
-                return True
+                return True, rule.get("soft")
 
     meta_keys = ["mime_type", "duration", "width", "height", "file_size"]
     for rule in banlist:
@@ -423,19 +423,19 @@ async def is_banned_media(sig: dict, file_id, bot) -> bool:
             rule.get(k) is None or rule[k] == sig.get(k)
             for k in meta_keys
         ):
-            return True
+            return True, rule.get("soft")
             rule_hash = rule.get("sha256")
             if not rule_hash:
-                return True
+                return True, rule.get("soft")
             
             try:
                 sig["sha256"] = await compute_sha256(bot, file_id)
             except:
-                return True
+                return True, rule.get("soft")
 
-            return sig["sha256"] == rule_hash
+            return sig["sha256"] == rule_hash, rule.get("soft")
 
-    return False
+    return False, False
     
 async def broadcast(orig_chat_id, orig_msg_id, text, has_media, bot):
     kb = await make_link_keyboard(orig_chat_id, orig_msg_id, bot)
@@ -531,7 +531,10 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
             (msg.animation or msg.video or msg.document or (msg.photo[-1] if msg.photo else None)).file_id
         )
         
-        if await is_banned_media(sig, file_id, context.bot):
+        block, soft = await is_banned_media(sig, file_id, context.bot)
+        if block:
+            print("We got blocked media!")
+            
             try:
                 await context.bot.delete_message(
                     chat_id=update.effective_chat.id,
@@ -541,10 +544,11 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 print("failed to delete message")
                 pass 
             
-            try:
-                await context.bot.ban_chat_member(update.effective_chat.id, user.id)
-            except BadRequest as e:
-                print(f"Failed to ban {user.id}: {e}")
+            if not soft:
+                try:
+                    await context.bot.ban_chat_member(update.effective_chat.id, user.id)
+                except BadRequest as e:
+                    print(f"Failed to ban {user.id}: {e}")
             
             entry = {
                 "timestamp":    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
@@ -805,6 +809,12 @@ async def update_all_messages(bot, user_id):
     print(f"Update complete for user {user_id}")
 
 async def ban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await add_media_to_block(update, context, False)
+
+async def block_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await add_media_to_block(update, context, True)
+
+async def add_media_to_block(update: Update, context: ContextTypes.DEFAULT_TYPE, soft):
     user = update.effective_user
     msg  = update.effective_message
 
@@ -848,6 +858,8 @@ async def ban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.reply_text("ℹ️ Этот файл уже в банлисте (по метаданным).")
             return
 
+    if soft:
+        sig["soft"] = True
     add_ban_rule(sig)
 
     lines = [f"{k}={v}" for k,v in sig.items() if v is not None and not k.startswith("_")]
@@ -947,6 +959,7 @@ def main():
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("start", warn_use_dm, filters=~filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("ban", ban_media))
+    app.add_handler(CommandHandler("block", block_media))
     app.add_handler(CommandHandler("unban", unban_media))
     app.add_handler(CommandHandler("shutdown", shutdown_bot))
     app.add_handler(CommandHandler("top", top_command))
