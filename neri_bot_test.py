@@ -588,7 +588,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     daily_stats[user.id] = daily_stats.get(user.id, 0) + 1
     
     via = update.message.via_bot
-    if (via and via.username == COCKBOT_USERNAME):
+    if (via and via.username == COCKBOT_USERNAME and msg.forward_date is None):
         if update.message and update.message.text:
             cock_text = update.message.text or ""
             m = re.search(r"(\d+(?:\.\d+)?)\s*cm", cock_text, re.IGNORECASE)
