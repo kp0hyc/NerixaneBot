@@ -18,6 +18,8 @@ from zoneinfo import ZoneInfo
 
 from pathlib import Path
 
+from typing import Callable, Awaitable
+
 from html import escape
 
 from telethon import TelegramClient, events, types
@@ -356,9 +358,36 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
         nav_buttons.append(
             InlineKeyboardButton("Следующая ▶️", callback_data=f"stats:{mode}:{page+1}")
         )
-
-    kb = InlineKeyboardMarkup([mode_buttons, nav_buttons])
+    action_buttons = [
+        InlineKeyboardButton("ℹ️ Отслеживать рыжопеча", callback_data=f"follow")
+    ]
+    kb = InlineKeyboardMarkup([mode_buttons, nav_buttons, action_buttons])
     return text, kb
+
+async def follow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    user = update.effective_user
+    if not user:
+        return
+
+    async def send_dm(text):
+        await context.bot.send_message(chat_id=user.id, text=text)
+
+    mention = f'<a href="tg://user?id={user.id}">{html.escape(user.full_name)}</a>: '
+    async def reply_in_chat(text):
+        await context.bot.send_message(
+            chat_id=q.message.chat_id,
+            text=mention + text,
+            parse_mode=constants.ParseMode.HTML
+        )
+
+    await _subscribe_flow(
+        user.id,
+        send_dm=send_dm,
+        reply_in_chat=reply_in_chat,
+    )
 
 async def stats_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -690,38 +719,50 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_to_message_id=update.message.message_id
     )
 
-async def subscribe(update: Update, context: CallbackContext):
-    user = update.effective_user
-    if not user:
-        return
-    uid = user.id
-    if uid in SUBSCRIBERS:
+async def _subscribe_flow(
+    user_id: int,
+    *,
+    send_dm: Callable[[str], Awaitable],
+    reply_in_chat: Callable[[str], Awaitable],
+):
+    if user_id in SUBSCRIBERS:
         try:
-            await context.bot.send_message(
-                chat_id=uid,
-                text="🎉 Всё настроено, сообщения будут приходить сюда!"
-            )
-            await update.message.reply_text("✅ Вы уже сталкерите Рыжопеча.")
+            await send_dm("🎉 Всё настроено, сообщения будут приходить сюда!")
+            await reply_in_chat("✅ Вы уже сталкерите Рыжопеча.")
         except Forbidden:
-            await update.message.reply_text(
+            await reply_in_chat(
                 "✅ Я тебя записал, но не смогу отправить сообщение, пока ты не откроешь чат со мной. "
                 "Пожалуйста отправь /start мне в ЛС."
             )
     else:
-        SUBSCRIBERS.add(uid)
+        SUBSCRIBERS.add(user_id)
         save_subscribers(SUBSCRIBERS)
-        await update.message.reply_text("🎉 Поздравляю, теперь ты сталкеришь Рыжопеча!")
-        
+
+        await reply_in_chat("🎉 Поздравляю, теперь ты сталкеришь Рыжопеча!")
         try:
-            await context.bot.send_message(
-                chat_id=uid,
-                text="🎉 Всё настроено, сообщения будут приходить сюда!"
-            )
+            await send_dm("🎉 Всё настроено, сообщения будут приходить сюда!")
         except Forbidden:
-            await update.message.reply_text(
+            await reply_in_chat(
                 "✅ Я тебя записал, но не смогу отправить сообщение, пока ты не откроешь чат со мной. "
                 "Пожалуйста отправь /start мне в ЛС."
             )
+
+async def subscribe(update: Update, context: CallbackContext):
+    user = update.effective_user
+    if not user:
+        return
+
+    async def send_dm(text):
+        await context.bot.send_message(chat_id=user.id, text=text)
+
+    async def reply_in_chat(text):
+        await update.message.reply_text(text)
+
+    await _subscribe_flow(
+        user.id,
+        send_dm=send_dm,
+        reply_in_chat=reply_in_chat,
+    )
 
 async def unsubscribe(update: Update, context: CallbackContext):
     user = update.effective_user
@@ -1011,6 +1052,8 @@ def main():
     app.add_handler(CommandHandler("shutdown", shutdown_bot))
     app.add_handler(CommandHandler("top", top_command))
     app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|cock):\d+$"))
+    app.add_handler(CallbackQueryHandler(follow_callback, pattern=r"^follow$")
+)
 
     @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
     async def on_deleted(event):
