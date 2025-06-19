@@ -74,6 +74,7 @@ BANLIST_FILE = "banlist.json"
 STATS_FILE = "message_stats.json"
 DAILY_STATS_DIR = Path("daily_stats")
 LAST_SIZES_FILE = "last_sizes.json"
+SOCIAL_RATING_FILE = "social_rating.json"
 DAILY_STATS_DIR.mkdir(exist_ok=True)
 
 TYUMEN = ZoneInfo("Asia/Yekaterinburg")
@@ -86,11 +87,33 @@ TARGET_NICKS = [
     "Принцесса рунета",
     "Яся",
     "Рыжейшество",
-    "Яр!%#"
+    "Яр!%#",
+    "Рыжая жёппа",
+    "Рыжая рептилия"
 ]
 
 def _daily_path_for(date_obj: datetime.date) -> Path:
     return DAILY_STATS_DIR / f"daily_stats_{date_obj.isoformat()}.json"
+
+def load_social_rating():
+    global social_rating
+    try:
+        with open(SOCIAL_RATING_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            social_rating = {
+                int(uid): {"additional": int(v["additional"]), "boosts": int(v["boosts"])}
+                for uid, v in data.items()
+            }
+    except (FileNotFoundError, json.JSONDecodeError):
+        social_rating = {}
+
+def save_social_rating():
+    to_dump = {
+        str(uid): {"additional": info["additional"], "boosts": info["boosts"]}
+        for uid, info in social_rating.items()
+    }
+    with open(SOCIAL_RATING_FILE, "w", encoding="utf-8") as f:
+        json.dump(to_dump, f, ensure_ascii=False, indent=2)
 
 def load_stats():
     global message_stats, daily_stats
@@ -234,17 +257,19 @@ message_stats: dict[int, int] = {}
 daily_stats:  dict[int,int] = {}
 stats_sessions: dict[int, int] = {}
 last_sizes: dict[int, dict] = {}
+social_rating: dict[int, dict] = {}
 load_forward_map()
 load_banlist()
 load_stats()
 load_last_sizes()
+load_social_rating()
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 
-def reset_daily(context: ContextTypes.DEFAULT_TYPE):
+async def reset_daily(context: ContextTypes.DEFAULT_TYPE):
     yesterday = (datetime.now(TYUMEN) - timedelta(days=1)).date()
     ypath = _daily_path_for(yesterday)
     if daily_stats:
@@ -274,11 +299,16 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
         sort_key = lambda kv: kv[1]
         mode_ru = "сегодня"
         total = len(daily_stats)
-    else:  # "cock"
+    elif mode == "cock":
         stats = ((uid, info["size"]) for uid, info in last_sizes.items())
         sort_key = lambda kv: kv[1]
         mode_ru = "по размеру"
         total = len(last_sizes)
+    else:  # "social"
+        stats    = ((uid, info.get("additional", 0) + info.get("boosts", 0) * 5) for uid, info in social_rating.items())
+        sort_key = lambda kv: kv[1]
+        mode_ru  = "соц. рейтинг"
+        total    = len(social_rating)
 
     sorted_stats = sorted(stats, key=sort_key, reverse=True)
     start, end = page * PAGE_SIZE, (page + 1) * PAGE_SIZE
@@ -296,6 +326,8 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
         if mode == "cock":
             size = float(count)
             lines.append(f"{rank}. {name}: {size:.1f} см")
+        elif mode == "social":
+            lines.append(f"{rank}. {name}: {count} рейтинга")
         else:
             lines.append(f"{rank}. {name}: {count} сообщений")
 
@@ -304,6 +336,7 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
     modes = [
         ("global",  "🌐 Всё"),
         ("daily",   "📅 Сегодня"),
+        ("social",  "⚡ Соц. рейтинг"),
         ("cock",    "🍆 Размер"),
     ]
     mode_buttons = [
@@ -587,6 +620,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_stats[user.id] = message_stats.get(user.id, 0) + 1
     daily_stats[user.id] = daily_stats.get(user.id, 0) + 1
     
+    
     via = update.message.via_bot
     if (via and via.username == COCKBOT_USERNAME and msg.forward_date is None):
         if update.message and update.message.text:
@@ -598,8 +632,17 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 last_sizes[user.id] = {"size": size, "ts": ts}
                 save_last_sizes()
 
-            
-    
+    if not user.id in social_rating:
+        social_rating[user.id] = {"additional": 0, "boosts": 0}
+        save_social_rating()
+
+    bc = getattr(msg, "sender_boost_count", None)
+    if bc is None and hasattr(msg, "api_kwargs"):
+        bc = msg.api_kwargs.get("sender_boost_count", 0)
+    boost_count = int(bc or 0)
+    if social_rating[user.id]["boosts"] != boost_count:
+        social_rating[user.id]["boosts"] = boost_count
+        save_social_rating()
     
     if user.id != TARGET_USER:
         return
@@ -927,6 +970,9 @@ async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats_sessions[sent.message_id] = update.effective_user.id
 
 
+async def show_rating(update: Update, context: CallbackContext):
+    return
+
 async def shutdown_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user or user.id not in MODERATORS:
@@ -939,7 +985,7 @@ async def shutdown_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     sys.exit(0)
 
-def persist_stats(context: ContextTypes.DEFAULT_TYPE):
+async def persist_stats(context: ContextTypes.DEFAULT_TYPE):
     save_stats()
     save_daily_stats()
     print("Message stats saved.")
@@ -958,12 +1004,13 @@ def main():
     app.add_handler(CommandHandler("stop", unsubscribe))
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("start", warn_use_dm, filters=~filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("rating", show_rating))
     app.add_handler(CommandHandler("ban", ban_media))
     app.add_handler(CommandHandler("block", block_media))
     app.add_handler(CommandHandler("unban", unban_media))
     app.add_handler(CommandHandler("shutdown", shutdown_bot))
     app.add_handler(CommandHandler("top", top_command))
-    app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|cock):\d+$"))
+    app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|cock):\d+$"))
 
     @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
     async def on_deleted(event):
