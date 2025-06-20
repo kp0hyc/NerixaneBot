@@ -23,12 +23,21 @@ from typing import Callable, Awaitable
 from html import escape
 
 from telethon import TelegramClient, events, types
-from telethon.tl.types import ChannelParticipantsAdmins
+from telethon.tl.types import (
+    ChannelParticipantsAdmins, 
+    UpdateBotMessageReaction, 
+    PeerChat, 
+    PeerChannel, 
+    PeerUser,
+    ReactionEmoji, 
+    ReactionCustomEmoji,
+)
 
 from telegram import (
     constants,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    MessageEntity,
     Update,
 )
 from telegram.error import BadRequest, Forbidden, TimedOut
@@ -39,6 +48,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    MessageReactionHandler,
     filters,
 )
 
@@ -77,6 +87,7 @@ STATS_FILE = "message_stats.json"
 DAILY_STATS_DIR = Path("daily_stats")
 LAST_SIZES_FILE = "last_sizes.json"
 SOCIAL_RATING_FILE = "social_rating.json"
+WEIGHTS_FILE = Path("emoji_weights.json")
 DAILY_STATS_DIR.mkdir(exist_ok=True)
 
 TYUMEN = ZoneInfo("Asia/Yekaterinburg")
@@ -94,8 +105,28 @@ TARGET_NICKS = [
     "Рыжая рептилия"
 ]
 
+def _is_mod(user_id: int) -> bool:
+    return user_id in MODERATORS
+
 def _daily_path_for(date_obj: datetime.date) -> Path:
     return DAILY_STATS_DIR / f"daily_stats_{date_obj.isoformat()}.json"
+
+def load_emoji_weights():
+    global emoji_weights
+    if WEIGHTS_FILE.exists():
+        try:
+            raw = json.loads(WEIGHTS_FILE.read_text(encoding="utf-8"))
+            # coerce keys to str and values to int
+            emoji_weights = {str(k): int(v) for k, v in raw.items()}
+        except Exception:
+            # keep defaults on error
+            pass
+
+def save_emoji_weights():
+    WEIGHTS_FILE.write_text(
+        json.dumps(emoji_weights, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
 
 def load_social_rating():
     global social_rating
@@ -260,11 +291,13 @@ daily_stats:  dict[int,int] = {}
 stats_sessions: dict[int, int] = {}
 last_sizes: dict[int, dict] = {}
 social_rating: dict[int, dict] = {}
+emoji_weights: dict[str,int] = {}
 load_forward_map()
 load_banlist()
 load_stats()
 load_last_sizes()
 load_social_rating()
+load_emoji_weights()
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -580,6 +613,7 @@ async def broadcast(orig_chat_id, orig_msg_id, text, has_media, bot):
             pass
 
 async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("handle_cocksize")
     user = update.effective_user
     msg = update.message
     
@@ -717,6 +751,82 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"✍\n{SHEET_URL}",
         reply_to_message_id=update.message.message_id
+    )
+
+def extract_emojis(lst):
+    out = []
+    for r in lst:
+        if isinstance(r, ReactionEmoji):
+            out.append(r.emoticon)
+        elif isinstance(r, ReactionCustomEmoji):
+            out.append(f"<custom:{r.document_id}>")
+    return out
+
+async def on_message_reaction(mc, event):
+    print("got reaction")
+    print(event)
+    peer = event.peer
+    if isinstance(peer, PeerChat):
+        chat_id = peer.chat_id
+    elif isinstance(peer, PeerChannel):
+        chat_id = peer.channel_id
+    else:
+        return
+    
+    if -chat_id != ORIG_CHANNEL_ID:
+        return
+
+    msg_id = event.msg_id
+
+    msg = await mc.get_messages(chat_id, ids=msg_id)
+    if not msg or not msg.from_id:
+        return
+
+    from_id = msg.from_id
+    
+    if not hasattr(from_id, 'user_id'):
+        print("no user_id for reaction")
+        return
+    
+    author_id = from_id.user_id
+    if author_id != TARGET_USER:
+        return
+
+    old = getattr(event, 'old_reactions', []) or []
+    new = getattr(event, 'new_reactions', []) or getattr(event, 'new_reaction', [])
+
+    old_set = set(extract_emojis(old))
+    new_set = set(extract_emojis(new))
+    
+    added   = new_set - old_set
+    removed = old_set - new_set
+
+    print(f"added reactions: {added}")
+    print(f"removed reactions: {removed}")
+
+    delta = 0
+    for e in added:
+        delta += emoji_weights.get(e, 0)
+    for e in removed:
+        delta -= emoji_weights.get(e, 0)
+
+    if delta == 0:
+        return  # nothing to change
+
+    reactor_id = None
+    if hasattr(event, "actor"):
+        reactor_id = event.actor.user_id
+    else:
+        return
+
+    entry = social_rating.setdefault(reactor_id, {"additional": 0, "boosts": 0})
+    entry["additional"] = entry["additional"] + 10*delta
+    save_social_rating()
+
+    print(
+        f"[Reactions] msg#{msg_id} by user {author_id}: "
+        f"+{len(added)} added, -{len(removed)} removed → delta={delta}, "
+        f"new score={entry['additional']}"
     )
 
 async def _subscribe_flow(
@@ -1031,16 +1141,77 @@ async def persist_stats(context: ContextTypes.DEFAULT_TYPE):
     save_daily_stats()
     print("Message stats saved.")
 
+async def edit_weights_cmd(update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user or user.id not in MODERATORS:
+        return
+
+    dump = json.dumps(emoji_weights, ensure_ascii=False, indent=2)
+    
+    sent = await update.message.reply_text(dump)
+    context.user_data["weights_msg_id"] = sent.message_id
+
+async def edit_weights_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MODERATORS:
+        return
+    parent = msg.reply_to_message
+    if not parent or parent.message_id != context.user_data.get("weights_msg_id"):
+        return
+
+    text = msg.text or ""
+    m = re.match(r"\s*(.+?)\s*:\s*(\-?\d+)\s*$", text)
+    if not m:
+        return await msg.reply_text("ℹ️ Неверный формат. Напишите `emoji: число`.")
+
+    key_raw, val_raw = m.group(1), m.group(2)
+    ce = next(
+        (e for e in (msg.entities or [])
+         if e.type == MessageEntity.CUSTOM_EMOJI),
+        None
+    )
+    if ce:
+        key = f"<custom:{ce.custom_emoji_id}>"
+    else:
+        key = key_raw  
+
+    try:
+        weight = int(val_raw)
+    except ValueError:
+        return await msg.reply_text("ℹ️ Вторая часть должна быть числом.")
+
+    # update & save
+    emoji_weights[key] = weight
+    save_emoji_weights()
+
+    await msg.reply_text(f"✅ Обновлено: {key} → {weight}")
+
 def main():
     mc = TelegramClient('anon', API_ID, API_HASH)
     
     mc.start(bot_token=BOT_TOKEN)
 
-    app = ApplicationBuilder().token(BOT_TOKEN).get_updates_read_timeout(30).get_updates_write_timeout(30).build()
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .get_updates_read_timeout(30)
+        .get_updates_write_timeout(30)
+        .build()
+    )
     app.add_handler(
         MessageHandler(filters.Chat(chat_id=ORIG_CHANNEL_ID) & ~filters.COMMAND, handle_cocksize)
     )
-
+    
+    app.add_handler(CommandHandler("edit_weights", edit_weights_cmd))
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & filters.REPLY,
+            edit_weights_reply
+        ),
+        group=1
+    )
     app.add_handler(CommandHandler("notify",   subscribe))
     app.add_handler(CommandHandler("stop", unsubscribe))
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
@@ -1051,9 +1222,9 @@ def main():
     app.add_handler(CommandHandler("unban", unban_media))
     app.add_handler(CommandHandler("shutdown", shutdown_bot))
     app.add_handler(CommandHandler("top", top_command))
+    
     app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|cock):\d+$"))
-    app.add_handler(CallbackQueryHandler(follow_callback, pattern=r"^follow$")
-)
+    app.add_handler(CallbackQueryHandler(follow_callback, pattern=r"^follow$"))
 
     @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
     async def on_deleted(event):
@@ -1070,6 +1241,12 @@ def main():
         orig_msg  = event.message.id
         await edit_forwards(app.bot, event, orig_id, orig_msg)
 
+    @mc.on(events.Raw)
+    async def handler(event):
+        if not isinstance(event, UpdateBotMessageReaction):
+            return
+        await on_message_reaction(mc, event)
+
     app.job_queue.run_repeating(
         persist_stats,
         interval=300,
@@ -1081,7 +1258,9 @@ def main():
         time=time(hour=0, minute=0, tzinfo=TYUMEN)
     )
 
-    app.run_polling(timeout=30)
+    app.run_polling(
+        timeout=30,
+    )
     print("exiting")
 
 if __name__ == "__main__":
