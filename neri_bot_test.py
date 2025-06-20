@@ -7,6 +7,7 @@ import os
 import random
 import re
 import sys
+import unicodedata
 
 from dotenv import load_dotenv
 
@@ -23,6 +24,7 @@ from typing import Callable, Awaitable
 from html import escape
 
 from telethon import TelegramClient, events, types
+from telethon.utils import get_peer_id
 from telethon.tl.types import (
     ChannelParticipantsAdmins, 
     UpdateBotMessageReaction, 
@@ -762,6 +764,34 @@ def extract_emojis(lst):
             out.append(f"<custom:{r.document_id}>")
     return out
 
+def get_emoji_weight(e: str) -> int:
+    """
+    Look up e in emoji_weights, trying to normalize both
+    with and without the VARIATION SELECTOR-16 (U+FE0F).
+    """
+    # First try exactly as‐is
+    if e in emoji_weights:
+        return emoji_weights[e]
+
+    # Normalize to NFC (just in case)
+    e_nfc = unicodedata.normalize("NFC", e)
+    if e_nfc != e and e_nfc in emoji_weights:
+        return emoji_weights[e_nfc]
+
+    # Try adding VS16 if it’s missing
+    VS16 = "\uFE0F"
+    if not e_nfc.endswith(VS16):
+        cand = e_nfc + VS16
+        if cand in emoji_weights:
+            return emoji_weights[cand]
+    else:
+        # Or stripping it
+        cand = e_nfc.rstrip(VS16)
+        if cand in emoji_weights:
+            return emoji_weights[cand]
+
+    return 0
+
 async def on_message_reaction(mc, event):
     print("got reaction")
     print(event)
@@ -773,7 +803,9 @@ async def on_message_reaction(mc, event):
     else:
         return
     
-    if -chat_id != ORIG_CHANNEL_ID:
+    chat_id = get_peer_id(peer)
+    print("chat_id: ", chat_id)
+    if chat_id != ORIG_CHANNEL_ID:
         return
 
     msg_id = event.msg_id
@@ -789,7 +821,14 @@ async def on_message_reaction(mc, event):
         return
     
     author_id = from_id.user_id
-    if author_id != TARGET_USER:
+
+    reactor_id = None
+    if hasattr(event, "actor"):
+        reactor_id = event.actor.user_id
+    else:
+        return
+    
+    if reactor_id == author_id:
         return
 
     old = getattr(event, 'old_reactions', []) or []
@@ -806,25 +845,28 @@ async def on_message_reaction(mc, event):
 
     delta = 0
     for e in added:
-        delta += emoji_weights.get(e, 0)
+        delta += get_emoji_weight(e)
     for e in removed:
-        delta -= emoji_weights.get(e, 0)
-
+        delta -= get_emoji_weight(e)
+    
+    print("delta: ", delta)
     if delta == 0:
         return  # nothing to change
 
-    reactor_id = None
-    if hasattr(event, "actor"):
-        reactor_id = event.actor.user_id
-    else:
-        return
-
-    entry = social_rating.setdefault(reactor_id, {"additional": 0, "boosts": 0})
+    multiplier = 1
+    receiver = author_id
+    if reactor_id == TARGET_USER:
+        multiplier = 50
+    elif author_id == TARGET_USER:
+        receiver = reactor_id
+        multiplier = 10
+        
+    entry = social_rating.setdefault(receiver, {"additional": 0, "boosts": 0})
     entry["additional"] = entry["additional"] + 10*delta
     save_social_rating()
 
     print(
-        f"[Reactions] msg#{msg_id} by user {author_id}: "
+        f"[Reactions] msg#{msg_id} for user {author_id} by user {reactor_id}: "
         f"+{len(added)} added, -{len(removed)} removed → delta={delta}, "
         f"new score={entry['additional']}"
     )
