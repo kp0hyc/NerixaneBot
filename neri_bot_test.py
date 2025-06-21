@@ -816,22 +816,17 @@ async def on_message_reaction(mc, event):
     if not msg or not msg.from_id:
         return
 
-    from_id = msg.from_id
-    
-    if not hasattr(from_id, 'user_id'):
-        print("no user_id for reaction")
-        return
-    
-    author_id = from_id.user_id
+    author_id = get_peer_id(msg.from_id)
 
-    reactor_id = None
-    if hasattr(event, "actor"):
-        reactor_id = event.actor.user_id
-    else:
+    if not hasattr(event, "actor"):
         return
-    
+    reactor_id = get_peer_id(event.actor)
+
     if reactor_id == author_id:
         return
+
+    print("author_id: ", author_id)
+    print("reactor_id: ", reactor_id)
 
     old = getattr(event, 'old_reactions', []) or []
     new = getattr(event, 'new_reactions', []) or getattr(event, 'new_reaction', [])
@@ -857,9 +852,9 @@ async def on_message_reaction(mc, event):
 
     multiplier = 1
     receiver = author_id
-    if reactor_id == TARGET_USER:
+    if reactor_id == TARGET_USER or reactor_id == ORIG_CHANNEL_ID:
         multiplier = 50
-    elif author_id == TARGET_USER:
+    elif author_id == TARGET_USER or author_id == ORIG_CHANNEL_ID:
         receiver = reactor_id
         multiplier = 10
         
