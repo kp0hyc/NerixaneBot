@@ -685,9 +685,11 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_stats[user.id] = message_stats.get(user.id, 0) + 1
     daily_stats[user.id] = daily_stats.get(user.id, 0) + 1
     
-    
+    fd = getattr(msg, "forward_date", None)
+    if fd is None and hasattr(msg, "api_kwargs"):
+        fd = msg.api_kwargs.get("forward_date", None)
     via = update.message.via_bot
-    if (via and via.username == COCKBOT_USERNAME and msg.forward_date is None):
+    if (via and via.username == COCKBOT_USERNAME and fd is None):
         if update.message and update.message.text:
             cock_text = update.message.text or ""
             m = re.search(r"(\d+(?:\.\d+)?)\s*cm", cock_text, re.IGNORECASE)
@@ -862,7 +864,7 @@ async def on_message_reaction(mc, event):
         multiplier = 10
         
     entry = social_rating.setdefault(receiver, {"additional": 0, "boosts": 0})
-    entry["additional"] = entry["additional"] + 10*delta
+    entry["additional"] = entry["additional"] + multiplier*delta
     save_social_rating()
 
     print(
