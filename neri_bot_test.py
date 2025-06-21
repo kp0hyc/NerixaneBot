@@ -813,10 +813,20 @@ async def on_message_reaction(mc, event):
     msg_id = event.msg_id
 
     msg = await mc.get_messages(chat_id, ids=msg_id)
-    if not msg or not msg.from_id:
+    
+    if not msg:
         return
+    
+    print("orig_msg: ", msg)
 
-    author_id = get_peer_id(msg.from_id)
+    author_id = None
+    if hasattr(msg, "from_id"):
+        if msg.from_id != None:
+            author_id = get_peer_id(msg.from_id)
+        else:
+            author_id = TARGET_USER
+    else:
+        return
 
     if not hasattr(event, "actor"):
         return
@@ -854,7 +864,7 @@ async def on_message_reaction(mc, event):
     receiver = author_id
     if reactor_id == TARGET_USER or reactor_id == ORIG_CHANNEL_ID:
         multiplier = 50
-    elif author_id == TARGET_USER or author_id == ORIG_CHANNEL_ID:
+    elif author_id == TARGET_USER:
         receiver = reactor_id
         multiplier = 10
         
