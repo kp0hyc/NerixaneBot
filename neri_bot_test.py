@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, timezone
 from zoneinfo import ZoneInfo
 
 from pathlib import Path
@@ -25,8 +25,11 @@ from html import escape
 
 from telethon import TelegramClient, events, types
 from telethon.utils import get_peer_id
+from telethon.tl.functions.channels import GetParticipantRequest
 from telethon.tl.types import (
+    ChannelParticipant,
     ChannelParticipantsAdmins, 
+    ChannelParticipantsRecent,
     UpdateBotMessageReaction, 
     PeerChat, 
     PeerChannel, 
@@ -113,6 +116,19 @@ def _is_mod(user_id: int) -> bool:
 def _daily_path_for(date_obj: datetime.date) -> Path:
     return DAILY_STATS_DIR / f"daily_stats_{date_obj.isoformat()}.json"
 
+async def get_join_date(client: TelegramClient, chat_id: int, user_id: int):
+    try:
+        res = await client(GetParticipantRequest(
+            channel=chat_id,
+            participant=user_id
+        ))
+        part = res.participant  # this is a ChannelParticipant subclass
+        print("part: ", part)
+        return part.date      # datetime when they joined
+    except Exception as e:
+        print("exception in get_join_date: ", e)
+        return None
+
 def load_emoji_weights():
     global emoji_weights
     if WEIGHTS_FILE.exists():
@@ -136,7 +152,7 @@ def load_social_rating():
         with open(SOCIAL_RATING_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             social_rating = {
-                int(uid): {"additional": int(v["additional"]), "boosts": int(v["boosts"])}
+                int(uid): {"additional_chat": int(v["additional_chat"]), "additional_neri": int(v["additional_neri"]), "additional_self": int(v["additional_self"]), "boosts": int(v["boosts"])}
                 for uid, v in data.items()
             }
     except (FileNotFoundError, json.JSONDecodeError):
@@ -144,7 +160,7 @@ def load_social_rating():
 
 def save_social_rating():
     to_dump = {
-        str(uid): {"additional": info["additional"], "boosts": info["boosts"]}
+        str(uid): {"additional_chat": info["additional_chat"], "additional_neri": info["additional_neri"], "additional_self": info["additional_self"], "boosts": info["boosts"]}
         for uid, info in social_rating.items()
     }
     with open(SOCIAL_RATING_FILE, "w", encoding="utf-8") as f:
@@ -306,6 +322,18 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
+def count_total_rating(uid):
+    if uid not in social_rating:
+        return 0
+    info = social_rating[uid]
+    return info.get("additional_chat", 0) + info.get("additional_neri", 0) * 15 + info.get("boosts", 0) * 5
+
+def count_neri_rating(uid):
+    if uid not in social_rating:
+        return 0
+    info = social_rating[uid]
+    return info.get("additional_neri", 0) * 15 + info.get("boosts", 0) * 5
+
 async def reset_daily(context: ContextTypes.DEFAULT_TYPE):
     yesterday = (datetime.now(TYUMEN) - timedelta(days=1)).date()
     ypath = _daily_path_for(yesterday)
@@ -339,11 +367,13 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
         mode_ru = "по размеру"
 
     else:  # "social"
-        items = [
-            (uid, info.get("additional", 0) + info.get("boosts", 0) * 5)
-            for uid, info in social_rating.items()
-            if uid != TARGET_USER
-        ]
+        items = []
+        for uid, info in social_rating.items():
+            if uid == TARGET_USER:
+                continue
+            total = count_total_rating(uid)
+            neri  = count_neri_rating(uid)
+            items.append((uid, total, neri))
         mode_ru = "соц. рейтинг"
 
     sorted_stats = sorted(items, key=lambda kv: kv[1], reverse=True)
@@ -353,20 +383,25 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
 
     header = f"📊 Топ ({mode_ru.capitalize()}) #{start+1}–{min(end, total)} из {total}:\n"
     lines = [header]
-    for rank, (uid, count) in enumerate(chunk, start=start+1):
+    for rank, entry in enumerate(chunk, start=start+1):
+        if mode == "social":
+            uid, full, neri = entry
+        else:
+            uid, full = entry
+            neri = None
+
         try:
-            uc = await bot.get_chat(uid)
+            uc   = await bot.get_chat(uid)
             name = parse_name(uc)
         except:
             name = escape(str(uid))
 
         if mode == "cock":
-            size = float(count)
-            lines.append(f"{rank}. {name}: {size:.1f} см")
+            lines.append(f"{rank}. {name}: {float(full):.1f} см")
         elif mode == "social":
-            lines.append(f"{rank}. {name}: {count} рейтинга")
+            lines.append(f"{rank}. {name}: {full}({neri}) рейтинга")
         else:
-            lines.append(f"{rank}. {name}: {count} сообщений")
+            lines.append(f"{rank}. {name}: {full} сообщений")
 
     text = "\n".join(lines)
 
@@ -700,7 +735,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 save_last_sizes()
 
     if not user.id in social_rating:
-        social_rating[user.id] = {"additional": 0, "boosts": 0}
+        social_rating[user.id] = {"additional_chat": 0, "additional_neri": 0, "additional_self": 0, "boosts": 0}
         save_social_rating()
 
     bc = getattr(msg, "sender_boost_count", None)
@@ -837,6 +872,20 @@ async def on_message_reaction(mc, event):
 
     print("author_id: ", author_id)
     print("reactor_id: ", reactor_id)
+    
+    if reactor_id != ORIG_CHANNEL_ID and count_total_rating(reactor_id) < -100:
+        print("too low social rating")
+        return
+
+    if reactor_id != ORIG_CHANNEL_ID and reactor_id != TARGET_USER:
+        join_date = await get_join_date(mc, ORIG_CHANNEL_ID, reactor_id)
+        if not join_date:
+            print("user not in the chat to count rating")
+            return
+        now = datetime.now(timezone.utc)
+        if (now - join_date).days <= 3:
+            print("member is too new")
+            return
 
     old = getattr(event, 'old_reactions', []) or []
     new = getattr(event, 'new_reactions', []) or getattr(event, 'new_reaction', [])
@@ -860,24 +909,21 @@ async def on_message_reaction(mc, event):
     if delta == 0:
         return  # nothing to change
 
-    multiplier = 1
     receiver = author_id
+    entry_name = "additional_chat"
     if reactor_id == TARGET_USER or reactor_id == ORIG_CHANNEL_ID:
-        multiplier = 50
+        entry_name = "additional_neri"
     elif author_id == TARGET_USER:
-        receiver = reactor_id
-        multiplier = 10
-    
-    delta = multiplier*delta
+        entry_name = "additional_self"
         
-    entry = social_rating.setdefault(receiver, {"additional": 0, "boosts": 0})
-    entry["additional"] = entry["additional"] + delta
+    entry = social_rating.setdefault(receiver, {"additional_chat": 0, "additional_neri": 0, "additional_self": 0, "boosts": 0})
+    entry[entry_name] = entry[entry_name] + delta
     save_social_rating()
 
     print(
         f"[Reactions] msg#{msg_id} for user {author_id} by user {reactor_id}: "
         f"+{len(added)} added, -{len(removed)} removed → delta={delta}, "
-        f"new score={entry['additional']}"
+        f"new score={entry[entry_name]}"
     )
 
 async def _subscribe_flow(
@@ -1279,7 +1325,7 @@ def main():
 
     @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
     async def on_deleted(event):
-        print("chat id: ", event.chat_id)
+        print("delted in chat id: ", event.chat_id)
         for msg_id in event.deleted_ids:
             await delete_forwards(app.bot, ORIG_CHANNEL_ID, msg_id)
         
@@ -1287,7 +1333,7 @@ def main():
     
     @mc.on(events.MessageEdited(chats=ORIG_CHANNEL_ID))
     async def on_edited(event):
-        print("chat id: ", event.chat_id)
+        print("edited in chat id: ", event.chat_id)
         orig_id   = event.chat_id
         orig_msg  = event.message.id
         await edit_forwards(app.bot, event, orig_id, orig_msg)
