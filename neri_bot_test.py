@@ -327,27 +327,27 @@ def parse_name(uc):
 
 async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, InlineKeyboardMarkup]:
     if mode == "global":
-        stats = message_stats.items()
-        sort_key = lambda kv: kv[1]
+        items   = list(message_stats.items())
         mode_ru = "глобально"
-        total = len(message_stats)
-    elif mode == "daily":
-        stats = daily_stats.items()
-        sort_key = lambda kv: kv[1]
-        mode_ru = "сегодня"
-        total = len(daily_stats)
-    elif mode == "cock":
-        stats = ((uid, info["size"]) for uid, info in last_sizes.items())
-        sort_key = lambda kv: kv[1]
-        mode_ru = "по размеру"
-        total = len(last_sizes)
-    else:  # "social"
-        stats    = ((uid, info.get("additional", 0) + info.get("boosts", 0) * 5) for uid, info in social_rating.items())
-        sort_key = lambda kv: kv[1]
-        mode_ru  = "соц. рейтинг"
-        total    = len(social_rating)
 
-    sorted_stats = sorted(stats, key=sort_key, reverse=True)
+    elif mode == "daily":
+        items   = list(daily_stats.items())
+        mode_ru = "сегодня"
+
+    elif mode == "cock":
+        items   = [(uid, info["size"]) for uid, info in last_sizes.items()]
+        mode_ru = "по размеру"
+
+    else:  # "social"
+        items = [
+            (uid, info.get("additional", 0) + info.get("boosts", 0) * 5)
+            for uid, info in social_rating.items()
+            if uid != TARGET_USER
+        ]
+        mode_ru = "соц. рейтинг"
+
+    sorted_stats = sorted(items, key=lambda kv: kv[1], reverse=True)
+    total        = len(sorted_stats)
     start, end = page * PAGE_SIZE, (page + 1) * PAGE_SIZE
     chunk = sorted_stats[start:end]
 
@@ -867,9 +867,11 @@ async def on_message_reaction(mc, event):
     elif author_id == TARGET_USER:
         receiver = reactor_id
         multiplier = 10
+    
+    delta = multiplier*delta
         
     entry = social_rating.setdefault(receiver, {"additional": 0, "boosts": 0})
-    entry["additional"] = entry["additional"] + multiplier*delta
+    entry["additional"] = entry["additional"] + delta
     save_social_rating()
 
     print(
