@@ -94,6 +94,8 @@ DAILY_STATS_DIR = Path("daily_stats")
 LAST_SIZES_FILE = "last_sizes.json"
 SOCIAL_RATING_FILE = "social_rating.json"
 WEIGHTS_FILE = Path("emoji_weights.json")
+SOCIAL_ADD_RATING_IMAGE = "add_rating.png"
+SOCIAL_SUB_RATING_IMAGE = "sub_rating.png"
 DAILY_STATS_DIR.mkdir(exist_ok=True)
 
 TYUMEN = ZoneInfo("Asia/Yekaterinburg")
@@ -521,6 +523,8 @@ def add_ban_rule(sig: dict):
 
 def extract_media_signature(msg):
     obj = None
+    sticker_pack = None
+
     if msg.photo:
         obj = msg.photo[-1]
     elif msg.animation:
@@ -529,20 +533,25 @@ def extract_media_signature(msg):
         obj = msg.video
     elif msg.document:
         obj = msg.document
+    elif msg.sticker:
+        obj = msg.sticker
 
     if not obj:
         return None
 
-    return {
-        "file_unique_id": getattr(obj, "file_unique_id", None),
-        "mime_type":      getattr(obj, "mime_type",      None),
-        "duration":       getattr(obj, "duration",       None), 
-        "width":          getattr(obj, "width",          None),
-        "height":         getattr(obj, "height",         None),
-        "file_size":      getattr(obj, "file_size",      None),
-
-        "sha256":    None,
+    sig = {
+        "file_unique_id":   getattr(obj, "file_unique_id", None),
+        "mime_type":        getattr(obj, "mime_type",      None),
+        "duration":         getattr(obj, "duration",       None),
+        "width":            getattr(obj, "width",          None),
+        "height":           getattr(obj, "height",         None),
+        "file_size":        getattr(obj, "file_size",      None),
+        "sticker_set_name": getattr(obj, "set_name",       None),
+        # we'll fill this in later if you need to compare hashes
+        "sha256":         None,
     }
+
+    return sig
 
 async def compute_sha256(bot, file_id):
     bio = await bot.get_file(file_id)
@@ -550,11 +559,19 @@ async def compute_sha256(bot, file_id):
     return hashlib.sha256(data).hexdigest()
 
 async def is_banned_media(sig: dict, file_id, bot) -> (bool, bool):
+    pack = sig.get("sticker_set_name")
+    print("pack: ", pack)
+    if pack:
+        for rule in banlist:
+            if rule.get("sticker_set_name") == pack:
+                return True, rule.get("soft", False)
+        return False, False
+
     uid = sig.get("file_unique_id")
     if uid:
         for rule in banlist:
             if rule.get("file_unique_id") == uid:
-                return True, rule.get("soft")
+                return True, rule.get("soft", False)
 
     meta_keys = ["mime_type", "duration", "width", "height", "file_size"]
     for rule in banlist:
@@ -668,7 +685,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if sig:
         file_id = (
-            (msg.animation or msg.video or msg.document or (msg.photo[-1] if msg.photo else None)).file_id
+            (msg.sticker or msg.animation or msg.video or msg.document or (msg.photo[-1] if msg.photo else None)).file_id
         )
         
         block, soft = await is_banned_media(sig, file_id, context.bot)
@@ -1121,34 +1138,50 @@ async def add_media_to_block(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
     reply = msg.reply_to_message
     if not reply:
-        await msg.reply_text("⚠️ Ответьте на сообщение с видео/GIF/файлом, чтобы добавить его в банлист.")
+        await msg.reply_text(
+            "⚠️ Ответьте на сообщение с видео/GIF/файлом/стикером, чтобы добавить его в банлист."
+        )
         return
 
     sig = extract_media_signature(reply)
     if not sig:
-        await msg.reply_text("⚠️ В этом сообщении нет видео, анимации или документа.")
+        await msg.reply_text(
+            "⚠️ В этом сообщении нет видео, анимации, документа или стикера."
+        )
         return
-
 
     try:
         await context.bot.delete_message(chat_id=reply.chat.id, message_id=reply.message_id)
     except Exception:
         pass
 
-    file_id = (
-        (reply.animation or reply.video or reply.document or (reply.photo[-1] if reply.photo else None)).file_id
+    file_obj = (
+        reply.sticker
+        or reply.animation
+        or reply.video
+        or reply.document
+        or (reply.photo[-1] if reply.photo else None)
     )
-    
-    try:
-        sig["sha256"] = await compute_sha256(context.bot, file_id)
-    except Exception as e:
-        print(f"Failed to hash file: {e}")
+    file_id = getattr(file_obj, "file_id", None)
 
+    if file_id:
+        try:
+            sig["sha256"] = await compute_sha256(context.bot, file_id)
+        except Exception as e:
+            print(f"Failed to hash file: {e}")
+
+    # Проверяем, нет ли уже в банлисте
     meta_keys = ["mime_type", "duration", "width", "height", "file_size"]
     for rule in banlist:
+        # 1) по названию набора стикеров
+        if sig.get("sticker_set_name") and rule.get("sticker_set_name") == sig["sticker_set_name"]:
+            await msg.reply_text("ℹ️ Этот стикер/пак уже в банлисте (по названию набора).")
+            return
+        # 2) по уникальному ID файла
         if rule.get("file_unique_id") == sig["file_unique_id"]:
             await msg.reply_text("ℹ️ Этот файл уже в банлисте (по уникальному ID).")
             return
+        # 3) по остальным метаданным
         if all(
             rule.get(k) is None or rule[k] == sig.get(k)
             for k in meta_keys
@@ -1160,7 +1193,11 @@ async def add_media_to_block(update: Update, context: ContextTypes.DEFAULT_TYPE,
         sig["soft"] = True
     add_ban_rule(sig)
 
-    lines = [f"{k}={v}" for k,v in sig.items() if v is not None and not k.startswith("_")]
+    lines = [
+        f"{k}={v}"
+        for k, v in sig.items()
+        if v is not None and not k.startswith("_")
+    ]
     await msg.reply_text("✅ Добавил этот контент в банлист:\n" + "\n".join(lines))
 
 async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1173,28 +1210,41 @@ async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply = msg.reply_to_message
     if not reply:
         await msg.reply_text(
-            "⚠️ Ответьте на ранее заблокированное сообщение, чтобы убрать его из банлиста."
+            "⚠️ Ответьте на ранее заблокированное видео/GIF/документ/стикер, чтобы убрать его из банлиста."
         )
         return
 
     sig = extract_media_signature(reply)
     if not sig:
-        await msg.reply_text("⚠️ В этом сообщении нет видео, анимации или документа.")
+        await msg.reply_text(
+            "⚠️ В этом сообщении нет видео, анимации, документа или стикера."
+        )
         return
-    
-    file_id = (
-        (reply.animation or reply.video or reply.document or (reply.photo[-1] if reply.photo else None)).file_id
-    )
 
-    try:
-        sig["sha256"] = await compute_sha256(context.bot, file_id)
-    except:
-        pass
+    file_obj = (
+        reply.sticker
+        or reply.animation
+        or reply.video
+        or reply.document
+        or (reply.photo[-1] if reply.photo else None)
+    )
+    file_id = getattr(file_obj, "file_id", None)
+
+    if file_id:
+        try:
+            sig["sha256"] = await compute_sha256(context.bot, file_id)
+        except Exception:
+            pass
 
     meta_keys = ["mime_type", "duration", "width", "height", "file_size"]
     removed = 0
     new_rules = []
+
     for rule in banlist:
+        if sig.get("sticker_set_name") and rule.get("sticker_set_name") == sig["sticker_set_name"]:
+            removed += 1
+            continue
+
         if rule.get("file_unique_id") and rule["file_unique_id"] == sig.get("file_unique_id"):
             removed += 1
             continue
@@ -1205,7 +1255,7 @@ async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ):
             removed += 1
             continue
-        
+
         new_rules.append(rule)
 
     if removed:
@@ -1213,7 +1263,8 @@ async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_banlist()
         await msg.reply_text(f"✅ Удалено {removed} правил из банлиста.")
     else:
-        await msg.reply_text("ℹ️ Не нашёл совпадающих правил в банлисте.")
+        await msg.reply_text("ℹ️ Не найдено совпадающих правил в банлисте.")
+
 
 async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text, kb = await build_stats_page_async("global", 0, context.bot)
@@ -1316,6 +1367,73 @@ async def edit_weights_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await msg.reply_text(f"✅ Обновлено: {key} → {weight}")
 
+async def change_social_rating(update: Update, context: CallbackContext):
+    caller = update.effective_user
+    if not caller or caller.id != TARGET_USER:
+        return
+
+    reply = update.message.reply_to_message
+    if not reply:
+        await update.message.reply_text(
+            "Ты должна ответить на сообщение нужного чатера\n"
+            "/sc <+N или -N> [причина]\n"
+            "Например (ответом): /sc +3 Спасибки за вклад!"
+        )
+        return
+
+    target = reply.from_user
+    target_id = target.id
+    display_name = target.username and f"@{target.username}" or target.full_name or str(target_id)
+
+    if not context.args:
+        await update.message.reply_text("❌ Ты должна указать +N или -N, например /sc +2")
+        return
+
+    diff_str = context.args[0]
+    try:
+        diff = int(diff_str)
+    except ValueError:
+        await update.message.reply_text("❌ Вторым аргументом должно быть число, например +5 или -2.")
+        return
+
+    if target_id not in social_rating:
+        social_rating[target_id] = {
+            "additional_chat": 0,
+            "additional_neri": 0,
+            "additional_self": 0,
+            "boosts": 0,
+        }
+
+    old = social_rating[target_id]["additional_neri"]
+    social_rating[target_id]["additional_neri"] = old + diff
+
+    save_social_rating()
+    
+    word = "получил"
+    social_rating_image = SOCIAL_ADD_RATING_IMAGE
+    if diff < 0:
+        word = "потерял"
+        social_rating_image = SOCIAL_SUB_RATING_IMAGE
+
+    caption = f"✅ {display_name} {word} {abs(diff)} социальных кредитов"
+    if len(context.args) > 1:
+        reason = " ".join(context.args[1:])
+        caption += f"\nПричина: {reason}"
+
+    try:
+        with open(social_rating_image, "rb") as photo:
+            await context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=photo,
+                caption=caption
+            )
+    except FileNotFoundError:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=caption
+        )
+
+
 def main():
     mc = TelegramClient('anon', API_ID, API_HASH)
     
@@ -1350,6 +1468,7 @@ def main():
     app.add_handler(CommandHandler("unban", unban_media))
     app.add_handler(CommandHandler("shutdown", shutdown_bot))
     app.add_handler(CommandHandler("top", top_command))
+    app.add_handler(CommandHandler("sc", change_social_rating))
     
     app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|cock):\d+$"))
     app.add_handler(CallbackQueryHandler(follow_callback, pattern=r"^follow$"))
