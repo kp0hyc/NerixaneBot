@@ -3,6 +3,7 @@ import hashlib
 import html
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -379,6 +380,8 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
     sorted_stats = sorted(items, key=lambda kv: kv[1], reverse=True)
     total        = len(sorted_stats)
     start, end = page * PAGE_SIZE, (page + 1) * PAGE_SIZE
+    last_page = max(math.floor((total - 1) / PAGE_SIZE), 0)
+    print("last_page: ", last_page)
     chunk = sorted_stats[start:end]
 
     header = f"📊 Топ ({mode_ru.capitalize()}) #{start+1}–{min(end, total)} из {total}:\n"
@@ -428,6 +431,10 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
         nav_buttons.append(
             InlineKeyboardButton("Следующая ▶️", callback_data=f"stats:{mode}:{page+1}")
         )
+        if mode == "social" or mode == "cock":
+            nav_buttons.append(
+                InlineKeyboardButton("Последняя", callback_data=f"stats:{mode}:{last_page}")
+            )
     action_buttons = [
         InlineKeyboardButton("ℹ️ Отслеживать рыжопеча", callback_data=f"follow")
     ]
@@ -1230,12 +1237,36 @@ async def shutdown_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     save_stats()
     save_daily_stats()
+    clear_and_save_cocks()
 
     sys.exit(0)
+
+def clear_and_save_cocks():
+    cutoff = datetime.now() - timedelta(hours=24)
+
+    to_delete = []
+    for key, info in last_sizes.items():
+        ts_str = info.get("ts")
+        if not ts_str:
+            print("WARNING NO TIMESTAMP")
+            continue
+        try:
+            ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            print("WARNING WRONG TIMESTAMP")
+            continue
+
+        if ts < cutoff:
+            to_delete.append(key)
+
+    for key in to_delete:
+        del last_sizes[key]
+    save_last_sizes()
 
 async def persist_stats(context: ContextTypes.DEFAULT_TYPE):
     save_stats()
     save_daily_stats()
+    clear_and_save_cocks()
     print("Message stats saved.")
 
 async def edit_weights_cmd(update, context: ContextTypes.DEFAULT_TYPE):
