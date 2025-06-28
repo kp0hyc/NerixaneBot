@@ -151,19 +151,33 @@ def save_emoji_weights():
 
 def load_social_rating():
     global social_rating
+    DEFAULTS = {
+        "additional_chat": 0,
+        "additional_neri": 0,
+        "additional_self": 0,
+        "boosts": 0,
+        "manual_rating": 0,
+    }
+
     try:
         with open(SOCIAL_RATING_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            social_rating = {
-                int(uid): {"additional_chat": int(v["additional_chat"]), "additional_neri": int(v["additional_neri"]), "additional_self": int(v["additional_self"]), "boosts": int(v["boosts"])}
-                for uid, v in data.items()
+
+        social_rating = {
+            int(uid): {
+                k: int(v.get(k, DEFAULTS[k]))
+                for k in DEFAULTS
             }
+            for uid, v in data.items()
+        }
+
     except (FileNotFoundError, json.JSONDecodeError):
+        print("Couldn't read social rating")
         social_rating = {}
 
 def save_social_rating():
     to_dump = {
-        str(uid): {"additional_chat": info["additional_chat"], "additional_neri": info["additional_neri"], "additional_self": info["additional_self"], "boosts": info["boosts"]}
+        str(uid): {"additional_chat": info["additional_chat"], "additional_neri": info["additional_neri"], "additional_self": info["additional_self"], "boosts": info["boosts"], "manual_rating": info["manual_rating"]}
         for uid, info in social_rating.items()
     }
     with open(SOCIAL_RATING_FILE, "w", encoding="utf-8") as f:
@@ -329,13 +343,13 @@ def count_total_rating(uid):
     if uid not in social_rating:
         return 0
     info = social_rating[uid]
-    return info.get("additional_chat", 0) + info.get("additional_neri", 0) * 15 + info.get("boosts", 0) * 5
+    return info.get("additional_chat", 0) + info.get("additional_neri", 0) * 15 + info.get("boosts", 0) * 5 + info.get("manual_rating", 0)
 
 def count_neri_rating(uid):
     if uid not in social_rating:
         return 0
     info = social_rating[uid]
-    return info.get("additional_neri", 0) * 15 + info.get("boosts", 0) * 5
+    return info.get("additional_neri", 0) * 15 + info.get("boosts", 0) * 5 + info.get("manual_rating", 0)
 
 async def reset_daily(context: ContextTypes.DEFAULT_TYPE):
     yesterday = (datetime.now(TYUMEN) - timedelta(days=1)).date()
@@ -759,7 +773,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 save_last_sizes()
 
     if not user.id in social_rating:
-        social_rating[user.id] = {"additional_chat": 0, "additional_neri": 0, "additional_self": 0, "boosts": 0}
+        social_rating[user.id] = {"additional_chat": 0, "additional_neri": 0, "additional_self": 0, "boosts": 0, "manual_rating": 0}
         save_social_rating()
 
     bc = getattr(msg, "sender_boost_count", None)
@@ -940,7 +954,7 @@ async def on_message_reaction(mc, event):
     elif author_id == TARGET_USER:
         entry_name = "additional_self"
         
-    entry = social_rating.setdefault(receiver, {"additional_chat": 0, "additional_neri": 0, "additional_self": 0, "boosts": 0})
+    entry = social_rating.setdefault(receiver, {"additional_chat": 0, "additional_neri": 0, "additional_self": 0, "boosts": 0, "manual_rating": 0})
     entry[entry_name] = entry[entry_name] + delta
     save_social_rating()
 
@@ -1402,10 +1416,11 @@ async def change_social_rating(update: Update, context: CallbackContext):
             "additional_neri": 0,
             "additional_self": 0,
             "boosts": 0,
+            "manual_rating": 0,
         }
 
-    old = social_rating[target_id]["additional_neri"]
-    social_rating[target_id]["additional_neri"] = old + diff
+    old = social_rating[target_id]["manual_rating"]
+    social_rating[target_id]["manual_rating"] = old + diff
 
     save_social_rating()
     
