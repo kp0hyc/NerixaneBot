@@ -152,37 +152,42 @@ def save_emoji_weights():
 
 def load_social_rating():
     global social_rating
-    DEFAULTS = {
-        "additional_chat": 0,
-        "additional_neri": 0,
-        "additional_self": 0,
-        "boosts": 0,
-        "manual_rating": 0,
-    }
-
     try:
-        with open(SOCIAL_RATING_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        social_rating = {
-            int(uid): {
-                k: int(v.get(k, DEFAULTS[k]))
-                for k in DEFAULTS
+        raw = json.loads(open(SOCIAL_RATING_FILE, encoding="utf-8").read())
+        social_rating = {}
+        for uid_str, v in raw.items():
+            uid = int(uid_str)
+            rc = {int(rid): int(cnt)
+                  for rid, cnt in v.get("reactor_counts", {}).items()}
+            total = int(v.get("total_reacts", sum(rc.values())))
+            social_rating[uid] = {
+                "reactor_counts": rc,
+                "total_reacts":    total,
+                "additional_chat": int(v.get("additional_chat", 0)),
+                "additional_neri": int(v.get("additional_neri", 0)),
+                "additional_self": int(v.get("additional_self", 0)),
+                "boosts":          int(v.get("boosts", 0)),
+                "manual_rating":   int(v.get("manual_rating", 0)),
             }
-            for uid, v in data.items()
-        }
-
     except (FileNotFoundError, json.JSONDecodeError):
-        print("Couldn't read social rating")
         social_rating = {}
 
 def save_social_rating():
-    to_dump = {
-        str(uid): {"additional_chat": info["additional_chat"], "additional_neri": info["additional_neri"], "additional_self": info["additional_self"], "boosts": info["boosts"], "manual_rating": info["manual_rating"]}
+    dump = {
+        str(uid): {
+            "reactor_counts": {str(rid): cnt
+                               for rid, cnt in info["reactor_counts"].items()},
+            "total_reacts":    info["total_reacts"],
+            "additional_chat": info["additional_chat"],
+            "additional_neri": info["additional_neri"],
+            "additional_self": info["additional_self"],
+            "boosts":          info["boosts"],
+            "manual_rating":   info["manual_rating"],
+        }
         for uid, info in social_rating.items()
     }
     with open(SOCIAL_RATING_FILE, "w", encoding="utf-8") as f:
-        json.dump(to_dump, f, ensure_ascii=False, indent=2)
+        json.dump(dump, f, ensure_ascii=False, indent=2)
 
 def load_stats():
     global message_stats, daily_stats
@@ -810,7 +815,15 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 save_last_sizes()
 
     if not user.id in social_rating:
-        social_rating[user.id] = {"additional_chat": 0, "additional_neri": 0, "additional_self": 0, "boosts": 0, "manual_rating": 0}
+        social_rating[user.id] = {
+            "reactor_counts": {},
+            "total_reacts":    0,
+            "additional_chat": 0,
+            "additional_neri": 0,
+            "additional_self": 0,
+            "boosts":          0,
+            "manual_rating":   0,
+        }
         save_social_rating()
 
     bc = getattr(msg, "sender_boost_count", None)
@@ -979,6 +992,36 @@ async def on_message_reaction(mc, event):
         delta += get_emoji_weight(e)
     for e in removed:
         delta -= get_emoji_weight(e)
+        
+    if delta == 0:
+        print("delta is zero, we quit")
+        return
+
+    entry = social_rating.setdefault(author_id, {
+        "reactor_counts": {},
+        "total_reacts":    0,
+        "additional_chat": 0,
+        "additional_neri": 0,
+        "additional_self": 0,
+        "boosts":          0,
+        "manual_rating":   0,
+    })
+    
+    if reactor_id != TARGET_USER and reactor_id != ORIG_CHANNEL_ID and author_id != TARGET_USER:
+        rc = entry["reactor_counts"]
+        prev = rc.get(reactor_id, 0)
+
+        total = sum(rc.values())
+
+        if total >= 50:
+            cap = floor(0.2 * total)
+            excess = 0
+            if prev > cap:
+                print("Too many reacts counted!")
+                return
+
+        rc[reactor_id] = prev + 1
+        entry["total_reacts"] = total + 1
     
     print("delta: ", delta)
     if delta == 0:
@@ -991,7 +1034,6 @@ async def on_message_reaction(mc, event):
     elif author_id == TARGET_USER:
         entry_name = "additional_self"
         
-    entry = social_rating.setdefault(receiver, {"additional_chat": 0, "additional_neri": 0, "additional_self": 0, "boosts": 0, "manual_rating": 0})
     entry[entry_name] = entry[entry_name] + delta
     save_social_rating()
 
