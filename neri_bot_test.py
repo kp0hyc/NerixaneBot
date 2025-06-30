@@ -114,6 +114,19 @@ TARGET_NICKS = [
     "Рыжая рептилия"
 ]
 
+HOMOGLYPHS = {
+    ord('x'): 'х', ord('X'): 'х',
+    ord('o'): 'о', ord('O'): 'о', ord('0'): 'о',
+    ord('a'): 'а', ord('A'): 'а',
+    ord('p'): 'р', ord('P'): 'р',
+    ord('h'): 'н', ord('H'): 'н',
+    ord('t'): 'т', ord('T'): 'т',
+    ord('y'): 'у', ord('Y'): 'у',
+    ord('k'): 'к', ord('K'): 'к',
+    ord('c'): 'с', ord('C'): 'с',
+    ord('m'): 'м', ord('M'): 'м',
+}
+
 def _is_mod(user_id: int) -> bool:
     return user_id in MODERATORS
 
@@ -351,6 +364,14 @@ load_stats()
 load_last_sizes()
 load_social_rating()
 load_emoji_weights()
+
+_patterns = [
+    re.compile(
+        r'\W*'.join(map(re.escape, word)),  # letters separated by \W*
+        re.IGNORECASE
+    )
+    for word in BANWORDS
+]
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -625,8 +646,15 @@ async def is_banned_media(sig: dict, file_id, bot) -> (bool, bool):
 
     return False, False
 
+def normalize(text):
+    return text.translate(HOMOGLYPHS).lower()
+
 def check_banwords(text):
-    return any(s in text.lower() for s in BANWORDS)
+    norm = normalize(text)
+    for pat in _patterns:
+        if pat.search(norm):
+            return True
+    return False
     
 async def broadcast(orig_chat_id, orig_msg_id, text, has_media, bot):
     kb = await make_link_keyboard(orig_chat_id, orig_msg_id, bot)
