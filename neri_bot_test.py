@@ -94,6 +94,7 @@ DAILY_STATS_DIR = Path("daily_stats")
 LAST_SIZES_FILE = "last_sizes.json"
 SOCIAL_RATING_FILE = "social_rating.json"
 WEIGHTS_FILE = Path("emoji_weights.json")
+BANWORDS_FILE = "banwords.json"
 SOCIAL_ADD_RATING_IMAGE = "add_rating.png"
 SOCIAL_SUB_RATING_IMAGE = "sub_rating.png"
 DAILY_STATS_DIR.mkdir(exist_ok=True)
@@ -305,6 +306,17 @@ def load_moderators():
     except (IOError, ValueError):
         return set()
 
+def load_banwords():
+    try:
+        with open(BANWORDS_FILE, "r") as f:
+            return set(json.load(f))
+    except (IOError, ValueError):
+        return set()
+
+def save_banwords():
+    with open(BANWORDS_FILE, "w") as f:
+        json.dump(list(BANWORDS), f)
+
 def load_subscribers():
     try:
         with open(SUBSCRIBERS_FILE, "r") as f:
@@ -318,6 +330,7 @@ def save_subscribers(subs: set):
 
 # initialize in-memory set
 SUBSCRIBERS = load_subscribers()
+BANWORDS = load_banwords()
 MODERATORS = load_moderators()
 forward_map = {}
 banlist: list[dict] = []
@@ -606,6 +619,9 @@ async def is_banned_media(sig: dict, file_id, bot) -> (bool, bool):
             return sig["sha256"] == rule_hash, rule.get("soft")
 
     return False, False
+
+def check_banwords(text):
+    return any(s in text.lower() for s in BANWORDS)
     
 async def broadcast(orig_chat_id, orig_msg_id, text, has_media, bot):
     kb = await make_link_keyboard(orig_chat_id, orig_msg_id, bot)
@@ -695,9 +711,36 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg:
         return
     
+    if not user:
+        return
+
+    text = msg.text or msg.caption or ""
+    if check_banwords(text) and user.id != TARGET_USER:
+        print("We got blocked text!")
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=msg.message_id
+            )
+        except:
+            print("failed to delete message")
+            pass 
+        entry = {
+            "timestamp":    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "chat_id":      update.effective_chat.id,
+            "user_id":      user.id,
+            "username":     user.username,
+            "first_name":   user.first_name,
+            "last_name":    user.last_name,
+            "text":         text
+        }
+        
+        print(entry)
+        return
+    
     sig = extract_media_signature(msg)
     
-    if sig:
+    if sig and user.id != TARGET_USER:
         file_id = (
             (msg.sticker or msg.animation or msg.video or msg.document or (msg.photo[-1] if msg.photo else None)).file_id
         )
@@ -747,13 +790,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if user_id in SUBSCRIBERS:
                 await update_all_messages(context.bot, user_id)
     
-    
-    if not msg.from_user:
-        return
     print(update)
-    
-    if not user:
-        return
 
     message_stats[user.id] = message_stats.get(user.id, 0) + 1
     daily_stats[user.id] = daily_stats.get(user.id, 0) + 1
@@ -1448,6 +1485,59 @@ async def change_social_rating(update: Update, context: CallbackContext):
             text=caption
         )
 
+async def add_banword(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MODERATORS:
+        return
+
+    if not context.args:
+        await msg.reply_text("Использование: /bw слово1 слово2 …")
+        return
+
+    new_words = {w.strip().lower() for w in context.args if w.strip()}
+
+    added = new_words - BANWORDS
+    BANWORDS.update(added)
+
+    if added:
+        await msg.reply_text(
+            f"✅ Добавлено {len(added)} новые слова: " +
+            ", ".join(sorted(added))
+        )
+    else:
+        await msg.reply_text("Все эти слова уже в списке.")
+    save_banwords()
+
+async def remove_banword(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MODERATORS:
+        return
+
+    if not context.args:
+        await msg.reply_text("Использование: /remove_bw слово1 слово2 …")
+        return
+
+    requested = {w.strip().lower() for w in context.args if w.strip()}
+
+    present    = requested & BANWORDS
+    not_found  = requested - BANWORDS
+
+    BANWORDS.difference_update(present)
+
+    if present:
+        await msg.reply_text(
+            f"✅ Убрано {len(present)} слов(а): " + ", ".join(sorted(present)) +
+            (f"\n⚠️ Не найдено: {', '.join(sorted(not_found))}"
+             if not_found else "")
+        )
+    else:
+        await msg.reply_text("Ни одно из указанных слов не было в списке бан-слов.")
+    save_banwords()
+
 
 def main():
     mc = TelegramClient('anon', API_ID, API_HASH)
@@ -1484,6 +1574,8 @@ def main():
     app.add_handler(CommandHandler("shutdown", shutdown_bot))
     app.add_handler(CommandHandler("top", top_command))
     app.add_handler(CommandHandler("sc", change_social_rating))
+    app.add_handler(CommandHandler("bw", add_banword))
+    app.add_handler(CommandHandler("remove_bw", remove_banword))
     
     app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|cock):\d+$"))
     app.add_handler(CallbackQueryHandler(follow_callback, pattern=r"^follow$"))
