@@ -1,4 +1,5 @@
 import asyncio
+import glob
 import hashlib
 import html
 import json
@@ -166,6 +167,39 @@ def save_emoji_weights():
         json.dumps(emoji_weights, ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
+
+def load_old_social_rating():
+    global old_social_rating
+    old_social_rating = {}
+    
+    root_dir = os.getcwd()
+    pattern = os.path.join(root_dir, "social_rating_*.json")
+
+    for path in glob.glob(pattern):
+        if os.path.abspath(path) == os.path.abspath(SOCIAL_RATING_FILE):
+            continue
+
+        try:
+            with open(path, encoding="utf-8") as f:
+                raw = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+
+        for uid_str, v in raw.items():
+            uid = int(uid_str)
+            hist = old_social_rating.setdefault(uid, {
+                "additional_chat": 0,
+                "additional_neri": 0,
+                "additional_self": 0,
+                "boosts":          0,
+                "manual_rating":   0,
+            })
+
+            hist["additional_chat"] += int(v.get("additional_chat", 0))
+            hist["additional_neri"] += int(v.get("additional_neri", 0))
+            hist["additional_self"] += int(v.get("additional_self", 0))
+            hist["boosts"]          += int(v.get("boosts", 0))
+            hist["manual_rating"]   += int(v.get("manual_rating", 0))
 
 def load_social_rating():
     global social_rating
@@ -373,15 +407,23 @@ def load_meta_info():
     else:
         META_INFO["last_message_time"] = datetime.now()
 
+    join_ts = data.get("join_bot_time")
+    if isinstance(join_ts, (int, float)):
+        META_INFO["join_bot_time"] = datetime.fromtimestamp(join_ts)
+    else:
+        META_INFO["join_bot_time"] = datetime.now()
+
 def save_meta_info():
     first_dt = META_INFO.get("first_message_time", datetime.now())
     last_dt  = META_INFO.get("last_message_time",  datetime.now())
+    join_dt  = META_INFO.get("join_bot_time",  datetime.now())
 
     serializable = {
         "afk_time": META_INFO.get("afk_time", 0),
         "alive_time": META_INFO.get("alive_time", 0),
         "first_message_time": first_dt.timestamp(),
         "last_message_time":  last_dt.timestamp(),
+        "join_bot_time":  join_dt.timestamp(),
     }
 
     with open(META_FILE, "w", encoding="utf-8") as f:
@@ -399,11 +441,13 @@ daily_stats:  dict[int,int] = {}
 stats_sessions: dict[int, int] = {}
 last_sizes: dict[int, dict] = {}
 social_rating: dict[int, dict] = {}
+old_social_rating: dict[int, dict] = {}
 emoji_weights: dict[str,int] = {}
 load_forward_map()
 load_banlist()
 load_stats()
 load_last_sizes()
+load_old_social_rating()
 load_social_rating()
 load_emoji_weights()
 load_meta_info()
@@ -429,16 +473,16 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-def count_total_rating(uid):
-    if uid not in social_rating:
+def count_total_rating(sr, uid):
+    if uid not in sr:
         return 0
-    info = social_rating[uid]
+    info = sr[uid]
     return info.get("additional_chat", 0) + info.get("additional_neri", 0) * 15 + info.get("boosts", 0) * 5 + info.get("manual_rating", 0)
 
-def count_neri_rating(uid):
-    if uid not in social_rating:
+def count_neri_rating(sr, uid):
+    if uid not in sr:
         return 0
-    info = social_rating[uid]
+    info = sr[uid]
     return info.get("additional_neri", 0) * 15 + info.get("boosts", 0) * 5 + info.get("manual_rating", 0)
 
 async def reset_daily(context: ContextTypes.DEFAULT_TYPE):
@@ -460,10 +504,11 @@ def parse_name(uc):
         return escape(f"@{uc.username}")
     return escape(str(uid))
 
+
 async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, InlineKeyboardMarkup]:
     if mode == "global":
         items   = list(message_stats.items())
-        mode_ru = "глобально"
+        mode_ru = "глобально по сообщениям"
 
     elif mode == "daily":
         items   = list(daily_stats.items())
@@ -473,15 +518,29 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
         items   = [(uid, info["size"]) for uid, info in last_sizes.items()]
         mode_ru = "по размеру"
 
-    else:  # "social"
+    elif mode == "social":
         items = []
         for uid, info in social_rating.items():
             if uid == TARGET_USER:
                 continue
-            total = count_total_rating(uid)
-            neri  = count_neri_rating(uid)
+            total = count_total_rating(social_rating, uid)
+            neri  = count_neri_rating(social_rating, uid)
             items.append((uid, total, neri))
-        mode_ru = "соц. рейтинг"
+        mode_ru = "соц. рейтинг (текущий)"
+
+    elif mode == "social_global":
+        items = []
+        for uid, info in old_social_rating.items():
+            if uid == TARGET_USER:
+                continue
+            total = count_total_rating(old_social_rating, uid) + count_total_rating(social_rating, uid)
+            neri  = count_neri_rating(old_social_rating, uid) + count_neri_rating(social_rating, uid)
+            items.append((uid, total, neri))
+        mode_ru = "соц. рейтинг (глобальный)"
+
+    else:
+        items   = []
+        mode_ru = mode
 
     sorted_stats = sorted(items, key=lambda kv: kv[1], reverse=True)
     total        = len(sorted_stats)
@@ -493,7 +552,7 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
     header = f"📊 Топ ({mode_ru.capitalize()}) #{start+1}–{min(end, total)} из {total}:\n"
     lines = [header]
     for rank, entry in enumerate(chunk, start=start+1):
-        if mode == "social":
+        if mode.startswith("social"):
             uid, full, neri = entry
         else:
             uid, full = entry
@@ -507,25 +566,29 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
 
         if mode == "cock":
             lines.append(f"{rank}. {name}: {float(full):.1f} см")
-        elif mode == "social":
+        elif mode.startswith("social"):
             lines.append(f"{rank}. {name}: {full}({neri}) рейтинга")
         else:
             lines.append(f"{rank}. {name}: {full} сообщений")
 
     text = "\n".join(lines)
 
-    modes = [
-        ("global",  "🌐 Всё"),
-        ("daily",   "📅 Сегодня"),
-        ("social",  "⚡ Соц. рейтинг"),
-        ("cock",    "🍆 Размер"),
+    modes1 = [
+        ("global",        "🌐 Всё"),
+        ("daily",         "📅 Сегодня"),
+        ("cock",          "🍆 Размер"),
     ]
-    mode_buttons = [
-        InlineKeyboardButton(
-            label,
-            callback_data=f"stats:{m}:0"
-        )
-        for m, label in modes
+    modes2 = [
+        ("social",        "⚡ Соц. рейтинг"),
+        ("social_global","🌍 Соц. рейтинг (всего)"),
+    ]
+    mode1_buttons = [
+        InlineKeyboardButton(label, callback_data=f"stats:{m}:0")
+        for m, label in modes1
+    ]
+    mode2_buttons = [
+        InlineKeyboardButton(label, callback_data=f"stats:{m}:0")
+        for m, label in modes2
     ]
 
     nav_buttons = []
@@ -537,15 +600,15 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
         nav_buttons.append(
             InlineKeyboardButton("Следующая ▶️", callback_data=f"stats:{mode}:{page+1}")
         )
-        if mode == "social" or mode == "cock":
-            nav_buttons.append(
-                InlineKeyboardButton("Последняя", callback_data=f"stats:{mode}:{last_page}")
-            )
+    if mode in ("social", "social_global", "cock"):
+        nav_buttons.append(
+            InlineKeyboardButton("Последняя", callback_data=f"stats:{mode}:{last_page}")
+        )
     #action_buttons = [
     #    InlineKeyboardButton("ℹ️ Отслеживать рыжопеча", callback_data=f"follow")
     #]
     #kb = InlineKeyboardMarkup([mode_buttons, nav_buttons, action_buttons])
-    kb = InlineKeyboardMarkup([mode_buttons, nav_buttons])
+    kb = InlineKeyboardMarkup([mode1_buttons, mode2_buttons, nav_buttons])
     return text, kb
 
 async def follow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1105,7 +1168,7 @@ async def on_message_reaction(mc, event):
     print("author_id: ", author_id)
     print("reactor_id: ", reactor_id)
     
-    if reactor_id != ORIG_CHANNEL_ID and count_total_rating(reactor_id) < -100:
+    if reactor_id != ORIG_CHANNEL_ID and count_total_rating(social_rating, reactor_id) < -100:
         print("too low social rating")
         return
 
@@ -1526,6 +1589,7 @@ async def shutdown_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_stats()
     save_daily_stats()
     clear_and_save_cocks()
+    save_meta_info()
 
     sys.exit(0)
 
@@ -1671,6 +1735,39 @@ async def change_social_rating(update: Update, context: CallbackContext):
             text=caption
         )
 
+async def reset_monthly_social_rating(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now(TYUMEN)
+
+    if now.day != 1:
+        return
+
+    prev = now.replace(day=1) - timedelta(days=2)
+    month_name = prev.strftime("%B").lower()  # например 'july'
+    archive_file = f"social_rating_{month_name}.json"
+
+    dump = {
+        str(uid): {
+            "reactor_counts": {str(rid): cnt
+                               for rid, cnt in info["reactor_counts"].items()},
+            "total_reacts":    info["total_reacts"],
+            "additional_chat": info["additional_chat"],
+            "additional_neri": info["additional_neri"],
+            "additional_self": info["additional_self"],
+            "boosts":          info["boosts"],
+            "manual_rating":   info["manual_rating"],
+        }
+        for uid, info in social_rating.items()
+    }
+
+    with open(archive_file, "w", encoding="utf-8") as f:
+        json.dump(dump, f, ensure_ascii=False, indent=2)
+
+    social_rating.clear()
+    save_social_rating()
+    load_old_social_rating()
+
+    print(f"[Monthly reset] Archived to {archive_file} and cleared current social_rating.")
+
 async def add_banword(update: Update, context: CallbackContext):
     user = update.effective_user
     msg  = update.effective_message
@@ -1765,7 +1862,7 @@ def main():
     app.add_handler(CommandHandler("bw", add_banword))
     app.add_handler(CommandHandler("remove_bw", remove_banword))
     
-    app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|cock):\d+$"))
+    app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|social_global|cock):\d+$"))
     app.add_handler(CallbackQueryHandler(follow_callback, pattern=r"^follow$"))
 
     @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
@@ -1798,6 +1895,11 @@ def main():
     app.job_queue.run_daily(
         reset_daily,
         time=time(hour=0, minute=0, tzinfo=TYUMEN)
+    )
+    
+    app.job_queue.run_daily(
+        reset_monthly_social_rating,
+        time=time(hour=0, minute=1, tzinfo=TYUMEN)
     )
 
     app.run_polling(
