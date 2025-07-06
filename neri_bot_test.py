@@ -389,7 +389,10 @@ def compile_patterns():
     global _patterns
     _patterns = [
         re.compile(
-            r'\W*'.join(map(re.escape, word)),  # letters separated by \W*
+            ''.join(
+                rf'(?:{re.escape(ch)}\W*)+' 
+                for ch in word
+            ),
             re.IGNORECASE
         )
         for word in BANWORDS
