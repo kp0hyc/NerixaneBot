@@ -95,6 +95,7 @@ LAST_SIZES_FILE = "last_sizes.json"
 SOCIAL_RATING_FILE = "social_rating.json"
 WEIGHTS_FILE = Path("emoji_weights.json")
 BANWORDS_FILE = "banwords.json"
+META_FILE = "meta.json"
 SOCIAL_ADD_RATING_IMAGE = "add_rating.png"
 SOCIAL_SUB_RATING_IMAGE = "sub_rating.png"
 DAILY_STATS_DIR.mkdir(exist_ok=True)
@@ -126,6 +127,8 @@ HOMOGLYPHS = {
     ord('c'): 'с', ord('C'): 'с',
     ord('m'): 'м', ord('M'): 'м',
 }
+
+_patterns = []
 
 def _is_mod(user_id: int) -> bool:
     return user_id in MODERATORS
@@ -346,10 +349,25 @@ def save_subscribers(subs: set):
     with open(SUBSCRIBERS_FILE, "w") as f:
         json.dump(list(subs), f)
 
+def load_meta_info():
+    global META_INFO
+    try:
+        with open(META_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    META_INFO["afk_time"] = data.get("afk_time", 0)
+
+def save_meta_info():
+    serializable = {"afk_time": META_INFO.get("afk_time", 0)}
+    with open(META_FILE, "w", encoding="utf-8") as f:
+        json.dump(serializable, f, ensure_ascii=False, indent=2)
+
 # initialize in-memory set
 SUBSCRIBERS = load_subscribers()
 BANWORDS = load_banwords()
 MODERATORS = load_moderators()
+META_INFO = {}
 forward_map = {}
 banlist: list[dict] = []
 message_stats: dict[int, int] = {}
@@ -364,14 +382,21 @@ load_stats()
 load_last_sizes()
 load_social_rating()
 load_emoji_weights()
+load_meta_info()
+last_message_time = datetime.now()
 
-_patterns = [
-    re.compile(
-        r'\W*'.join(map(re.escape, word)),  # letters separated by \W*
-        re.IGNORECASE
-    )
-    for word in BANWORDS
-]
+def compile_patterns():
+    global _patterns
+    _patterns = [
+        re.compile(
+            r'\W*'.join(map(re.escape, word)),  # letters separated by \W*
+            re.IGNORECASE
+        )
+        for word in BANWORDS
+    ]
+    #print("_patterns: ", _patterns)
+
+compile_patterns()
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -490,10 +515,11 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
             nav_buttons.append(
                 InlineKeyboardButton("Последняя", callback_data=f"stats:{mode}:{last_page}")
             )
-    action_buttons = [
-        InlineKeyboardButton("ℹ️ Отслеживать рыжопеча", callback_data=f"follow")
-    ]
-    kb = InlineKeyboardMarkup([mode_buttons, nav_buttons, action_buttons])
+    #action_buttons = [
+    #    InlineKeyboardButton("ℹ️ Отслеживать рыжопеча", callback_data=f"follow")
+    #]
+    #kb = InlineKeyboardMarkup([mode_buttons, nav_buttons, action_buttons])
+    kb = InlineKeyboardMarkup([mode_buttons, nav_buttons])
     return text, kb
 
 async def follow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -651,6 +677,7 @@ def normalize(text):
 
 def check_banwords(text):
     norm = normalize(text)
+    #print("norm: ", norm)
     for pat in _patterns:
         if pat.search(norm):
             return True
@@ -735,6 +762,40 @@ async def broadcast(orig_chat_id, orig_msg_id, text, has_media, bot):
             )
         except (Forbidden, TimedOut, asyncio.CancelledError):
             pass
+
+def format_duration(delta: timedelta) -> str:
+    total = int(delta.total_seconds())
+    hrs, rem = divmod(total, 3600)
+    mins, secs = divmod(rem, 60)
+    parts = []
+    if hrs:  parts.append(f"{hrs} ч")
+    if mins: parts.append(f"{mins} мин")
+    if secs or not parts: parts.append(f"{secs} сек")
+    return " ".join(parts)
+
+async def check_afk_time(bot, chat_id):
+    print("we checking afk time")
+    global last_message_time
+    now = datetime.now()
+    delta = now - last_message_time
+    prev_record = META_INFO["afk_time"]
+    prev_td = timedelta(seconds=prev_record)
+
+    print("now: ", now)
+    print("last_message_time: ", last_message_time)
+    print("delta: ", delta)
+    print("prev_td: ", prev_td)
+
+    if delta > prev_td:
+        text = (
+            f"Чат был мёртв {format_duration(delta)}, реанимационные мероприятия  проведены успешно.\n"
+            f"📊 Предыдущая клиническая смерть длилась: {format_duration(prev_td)}."
+        )
+        await bot.send_message(chat_id, text)
+        META_INFO["afk_time"] = int(delta.total_seconds())
+
+    last_message_time = now
+    save_meta_info()
 
 async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("handle_cocksize")
@@ -861,6 +922,8 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if social_rating[user.id]["boosts"] != boost_count:
         social_rating[user.id]["boosts"] = boost_count
         save_social_rating()
+    
+    await check_afk_time(context.bot, update.effective_chat.id)
     
     if user.id != TARGET_USER:
         return
@@ -1042,7 +1105,7 @@ async def on_message_reaction(mc, event):
         total = sum(rc.values())
 
         if total >= 50:
-            cap = floor(0.2 * total)
+            cap = math.floor(0.2 * total)
             excess = 0
             if prev > cap:
                 print("Too many reacts counted!")
@@ -1579,6 +1642,7 @@ async def add_banword(update: Update, context: CallbackContext):
     else:
         await msg.reply_text("Все эти слова уже в списке.")
     save_banwords()
+    compile_patterns()
 
 async def remove_banword(update: Update, context: CallbackContext):
     user = update.effective_user
@@ -1607,6 +1671,7 @@ async def remove_banword(update: Update, context: CallbackContext):
     else:
         await msg.reply_text("Ни одно из указанных слов не было в списке бан-слов.")
     save_banwords()
+    compile_patterns()
 
 
 def main():
