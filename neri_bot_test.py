@@ -102,6 +102,7 @@ DAILY_STATS_DIR.mkdir(exist_ok=True)
 
 TYUMEN = ZoneInfo("Asia/Yekaterinburg")
 EDIT_TIMEOUT = timedelta(hours=48)
+CHAT_AFK_TIMEOUT = timedelta(minutes=15)
 PAGE_SIZE = 10
 
 TARGET_NICKS = [
@@ -356,10 +357,33 @@ def load_meta_info():
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         data = {}
+
     META_INFO["afk_time"] = data.get("afk_time", 0)
+    META_INFO["alive_time"] = data.get("alive_time", 0)
+
+    first_ts = data.get("first_message_time")
+    if isinstance(first_ts, (int, float)):
+        META_INFO["first_message_time"] = datetime.fromtimestamp(first_ts)
+    else:
+        META_INFO["first_message_time"] = datetime.now()
+
+    last_ts = data.get("last_message_time")
+    if isinstance(last_ts, (int, float)):
+        META_INFO["last_message_time"] = datetime.fromtimestamp(last_ts)
+    else:
+        META_INFO["last_message_time"] = datetime.now()
 
 def save_meta_info():
-    serializable = {"afk_time": META_INFO.get("afk_time", 0)}
+    first_dt = META_INFO.get("first_message_time", datetime.now())
+    last_dt  = META_INFO.get("last_message_time",  datetime.now())
+
+    serializable = {
+        "afk_time": META_INFO.get("afk_time", 0),
+        "alive_time": META_INFO.get("alive_time", 0),
+        "first_message_time": first_dt.timestamp(),
+        "last_message_time":  last_dt.timestamp(),
+    }
+
     with open(META_FILE, "w", encoding="utf-8") as f:
         json.dump(serializable, f, ensure_ascii=False, indent=2)
 
@@ -383,7 +407,6 @@ load_last_sizes()
 load_social_rating()
 load_emoji_weights()
 load_meta_info()
-last_message_time = datetime.now()
 
 def compile_patterns():
     global _patterns
@@ -776,29 +799,56 @@ def format_duration(delta: timedelta) -> str:
     if secs or not parts: parts.append(f"{secs} сек")
     return " ".join(parts)
 
-async def check_afk_time(bot, chat_id):
-    print("we checking afk time")
-    global last_message_time
+async def check_afk_time(bot, user, chat_id):
     now = datetime.now()
-    delta = now - last_message_time
-    prev_record = META_INFO["afk_time"]
-    prev_td = timedelta(seconds=prev_record)
 
-    print("now: ", now)
-    print("last_message_time: ", last_message_time)
-    print("delta: ", delta)
-    print("prev_td: ", prev_td)
+    last_time = META_INFO.get("last_message_time", now)
+    first_time = META_INFO.get("first_message_time", last_time)
 
-    if delta > prev_td:
-        text = (
-            f"Чат был мёртв {format_duration(delta)}, реанимационные мероприятия  проведены успешно.\n"
-            f"📊 Предыдущая клиническая смерть длилась: {format_duration(prev_td)}."
-        )
-        await bot.send_message(chat_id, text)
-        META_INFO["afk_time"] = int(delta.total_seconds())
+    delta_dead = now - last_time
+    delta_alive = last_time - first_time
 
-    last_message_time = now
+    prev_dead_secs = META_INFO.get("afk_time", 0)
+    prev_dead_td = timedelta(seconds=prev_dead_secs)
+    prev_alive_secs = META_INFO.get("alive_time", 0)
+    prev_alive_td = timedelta(seconds=prev_alive_secs)
+
+    if delta_dead > CHAT_AFK_TIMEOUT or delta_dead > prev_dead_td:
+        reanimator = parse_name(user) if user else "<i>неизвестный герой</i>"
+
+        new_dead_record = delta_dead > prev_dead_td
+        new_alive_record = delta_alive > prev_alive_td
+
+        if new_dead_record:
+            dead_info = (
+                f"🔥 Новый антирекорд простоя! "
+                f"Чат был мёртв {format_duration(delta_dead)} "
+                f"(предыдущий рекорд — {format_duration(prev_dead_td)})."
+            )
+            META_INFO["afk_time"] = int(delta_dead.total_seconds())
+        else:
+            dead_info = f"⏱ Чат был мёртв {format_duration(delta_dead)}."
+
+        if new_alive_record:
+            alive_info = (
+                f"🚀 Новый рекорд «жизни» чата! "
+                f"Вы срали непрерывно {format_duration(delta_alive)} "
+                f"(предыдущий рекорд — {format_duration(prev_alive_td)})."
+            )
+            META_INFO["alive_time"] = int(delta_alive.total_seconds())
+        else:
+            alive_info = f"Чат был жив {format_duration(delta_alive)}."
+
+        reanim_info  = f"💉 Реанимационные мероприятия успешно провёл {reanimator}."
+        text = "\n\n".join([dead_info, alive_info, reanim_info])
+        await bot.send_message(chat_id, text, parse_mode="HTML")
+
+        META_INFO["first_message_time"] = now
+
+    META_INFO["last_message_time"] = now
     save_meta_info()
+
+
 
 async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("handle_cocksize")
@@ -926,7 +976,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
         social_rating[user.id]["boosts"] = boost_count
         save_social_rating()
     
-    await check_afk_time(context.bot, update.effective_chat.id)
+    await check_afk_time(context.bot, user, update.effective_chat.id)
     
     if user.id != TARGET_USER:
         return
