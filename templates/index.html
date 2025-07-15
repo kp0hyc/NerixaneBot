@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Poll {{ poll_id }}</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 1rem; background: white; }
+    #user-info, #balance, #your-bet { margin-bottom: 1rem; font-size: 0.9rem; color: #555; }
+
+	.bar-container {
+	  position: relative;
+	  width: 100%;
+	  height: 1.5rem;          /* same as your fill height */
+	  background: #eee;
+	  border-radius: 4px;
+	  margin: 0.5rem 0;
+	  overflow: hidden;        /* hides any part of fill that overflows */
+	}
+
+	/* the colored bar, absolutely positioned behind the text */
+	.bar-fill {
+	  position: absolute;
+	  top: 0; left: 0; bottom: 0;
+	  transition: width 0.5s ease;
+	  border-radius: 4px 0 0 4px;   /* round only the left corners */
+	  z-index: 0;
+	}
+	.bar-fill.default   { background: #4caf50; }
+	.bar-fill.user-bet  { background: #ff9800; }
+
+	/* the text: sits on top, always fully visible */
+	.bar-text {
+	  position: relative;
+	  z-index: 1;
+	  display: inline-block;
+	  height: 100%;
+	  line-height: 1.5rem;
+	  padding: 0 0.5rem;
+	  white-space: nowrap;
+	  color: #000;              /* black text so it’s legible on both grey & colored bg */
+	  font-weight: bold;
+	}
+
+	/* keep your .option-button styles unchanged */
+	.option-button {
+	  display: block;
+	  width: 100%;
+	  padding: 0;
+	  border: none;
+	  background: none;
+	  text-align: left;
+	  cursor: pointer;
+	}
+	.option-button:disabled {
+	  cursor: not-allowed;
+	  opacity: 0.6;
+	}
+  </style>
+</head>
+<body>
+  <div id="user-info">Играем с Лаки...</div>
+  <div id="balance">Клеем веснушки...</div>
+  <div id="your-bet"></div>
+
+  <h1 id="question">Наливаем рыженку...</h1>
+  <div id="options"></div>
+
+  <script>
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+
+    const user = tg.initDataUnsafe.user || {};
+    const userInfoEl = document.getElementById('user-info');
+    const balanceEl = document.getElementById('balance');
+    const yourBetEl = document.getElementById('your-bet');
+    let currentBalance = 0;
+    let userBet = null;
+    let pollOptions = [];
+
+    // Display user info
+    (function(){
+      const firstName = user.first_name || '';
+      const lastName = user.last_name || '';
+      const username = user.username ? '@'+user.username : '';
+      const displayName = [firstName, lastName].filter(Boolean).join(' ');
+      userInfoEl.textContent = `Приветствую: ${displayName} ${username}`;
+    })();
+
+    // Fetch balance
+    function loadBalance() {
+      if (!user.id) return;
+      fetch(`/api/balance/${user.id}`)
+        .then(res=>res.json())
+        .then(data=>{
+          currentBalance = data.coins;
+          balanceEl.textContent = `Рыженки: ${currentBalance}`;
+        });
+    }
+
+    // Fetch user's existing bet
+    function loadUserBet(pollid) {
+      if (!user.id) return;
+      fetch(`/api/bet/${pollid}/${user.id}`)
+        .then(res => res.status===404?null:res.json())
+        .then(data => {
+          if (data) {
+            userBet = data;
+            yourBetEl.textContent = `Вы поставили ${data.amount} рыженки на ${pollOptions[data.option_idx]}`;
+			const selectedFill = document.querySelector(
+			  `.bar-fill[data-idx="${data.option_idx}"]`
+			);
+			if (selectedFill) {
+			  // remove default and add the highlight
+			  selectedFill.classList.remove('default');
+			  selectedFill.classList.add('user-bet');
+			}
+          }
+        });
+    }
+
+    const pollId = {{ poll_id }};
+
+	function renderOption(opt, totalVotes, isInteractive) {
+	  const share = totalVotes ? (opt.total / totalVotes * 100) : 0;
+	  // Outer container is still the button/div
+	  const container = document.createElement(isInteractive ? 'button' : 'div');
+	  if (isInteractive) {
+		container.className = 'option-button';
+		container.onclick = () => placeBet(opt.idx, opt.text);
+		if (userBet && userBet.option_idx !== opt.idx) container.disabled = true;
+	  }
+
+	  // New: a single "bar‐wrapper" with position:relative
+	  const barOuter = document.createElement('div');
+	  barOuter.className = 'bar-container';
+
+	  // 1️⃣ the colored background “fill”
+	  const fill = document.createElement('div');
+	  fill.dataset.idx = opt.idx;
+	  fill.className = 'bar-fill ' +
+		(userBet && userBet.option_idx === opt.idx ? 'user-bet' : 'default');
+	  fill.style.width = share.toFixed(1) + '%';
+	  barOuter.appendChild(fill);
+
+	  // 2️⃣ the text overlay, always fully visible
+	  const textSpan = document.createElement('span');
+	  textSpan.className = 'bar-text';
+	  textSpan.textContent = `${opt.text} — ${opt.total} (${share.toFixed(1)}%)`;
+	  barOuter.appendChild(textSpan);
+
+	  container.appendChild(barOuter);
+	  return container;
+	}
+
+    // Load poll and render UI or stats based on status
+    function loadPoll() {
+      fetch(`/api/poll/${pollId}`)
+        .then(r => r.json())
+        .then(poll => {
+          document.getElementById('question').textContent = poll.question;
+          const optsDiv = document.getElementById('options');
+          optsDiv.innerHTML = '';
+
+          // Sum up total votes
+          const totalVotes = poll.options.reduce((sum, o) => sum + o.total, 0);
+          pollOptions = poll.options.map(o => o.text);
+
+          // Finished: show final results
+          if (poll.status === 2) {
+            optsDiv.appendChild(Object.assign(document.createElement('div'), {
+              textContent: '🏁 Опрос окончен. Результаты:',
+              style: 'margin-bottom:0.5rem;font-weight:bold;'
+            }));
+            poll.options.forEach(opt => {
+              optsDiv.appendChild(renderOption(opt, totalVotes, false));
+            });
+            loadUserBet(pollId);
+            return;
+          }
+
+          // Closed: show totals but allow view of your bet
+          if (poll.status === 1) {
+            optsDiv.appendChild(Object.assign(document.createElement('div'), {
+              textContent: '⏸ Опрос закрыт. Ставки:',
+              style: 'margin-bottom:0.5rem;font-weight:bold;'
+            }));
+            poll.options.forEach(opt => {
+              optsDiv.appendChild(renderOption(opt, totalVotes, false));
+            });
+            loadUserBet(pollId);
+            return;
+          }
+
+          // Open: interactive UI with bars
+          poll.options.forEach(opt => {
+            optsDiv.appendChild(renderOption(opt, totalVotes, true));
+          });
+          loadUserBet(pollId);
+        });
+    }
+
+    // Place a bet
+    function placeBet(optionIdx, optionText) {
+      if (userBet && userBet.option_idx !== optionIdx) return;
+      const amt = prompt(`Сколько рыженки вы ставите на '${optionText}'?`);
+      const amount = parseInt(amt, 10);
+      if (!amount || amount <= 0) { alert('Неверное количество рыженки'); return; }
+      if (amount > currentBalance) { alert('Недостаточно рыженки'); return; }
+      fetch('/api/bet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ poll_id: pollId, option_idx: optionIdx, user_id: user.id, amount })
+      })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(err => { throw new Error(err.detail || 'Unknown error'); });
+        }
+        return res.json();
+      })
+      .then(() => {
+        loadBalance();
+        loadPoll();
+      })
+      .catch(err => {
+        alert(`Bet failed: ${err.message}`);
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadBalance();
+      loadPoll();
+    });
+  </script>
+</body>
+</html>

@@ -8,6 +8,7 @@ import math
 import os
 import random
 import re
+import sqlite3
 import sys
 import unicodedata
 
@@ -46,6 +47,7 @@ from telegram import (
     InlineKeyboardMarkup,
     MessageEntity,
     Update,
+    WebAppInfo,
 )
 from telegram.error import BadRequest, Forbidden, TimedOut
 from telegram.ext import (
@@ -71,6 +73,10 @@ GOOGLE_CREDS_PATH = os.environ["GOOGLE_CREDS_PATH"]
 
 ORIG_CHANNEL_ID   = int(os.environ["ORIG_CHANNEL_ID"])
 TARGET_USER       = int(os.environ["TARGET_USER"])
+
+BASE_URL          = os.environ["BASE_URL"]
+MY_BOT_USERNAME   = os.environ["MY_BOT_USERNAME"]
+WEB_APP_NAME      = os.environ["WEB_APP_NAME"] 
 
 COCKBOT_USERNAME  = os.environ["COCKBOT_USERNAME"]
 # ────────────────────────────────────────────────────────────────────────────────
@@ -105,6 +111,9 @@ TYUMEN = ZoneInfo("Asia/Yekaterinburg")
 EDIT_TIMEOUT = timedelta(hours=48)
 CHAT_AFK_TIMEOUT = timedelta(minutes=15)
 PAGE_SIZE = 10
+
+db = sqlite3.connect("info.db", check_same_thread=False)
+db.row_factory = sqlite3.Row
 
 TARGET_NICKS = [
     "Рыжая голова",
@@ -473,6 +482,30 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
+def check_init_user_table():
+    row = db.execute("SELECT COUNT(*) AS cnt FROM user").fetchone()
+    if row["cnt"] == 0:
+        for uid, info in social_rating.items():
+            total = count_total_rating(social_rating, uid)
+            db.execute(
+                "INSERT INTO user (id, coins) VALUES (?, ?)",
+                (uid, total)
+            )
+
+def update_coins(uid, coins):
+    with db:
+        row = db.execute(
+            "SELECT coins FROM user WHERE id = ?",
+            (uid,)
+        ).fetchone()
+        current = row["coins"] if row else 0
+        new_balance = current + coins
+        db.execute(
+            "INSERT INTO user (id, coins) VALUES (?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET coins = excluded.coins",
+            (uid, new_balance)
+        )
+
 def count_total_rating(sr, uid):
     if uid not in sr:
         return 0
@@ -506,6 +539,7 @@ def parse_name(uc):
 
 
 async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, InlineKeyboardMarkup]:
+    # выбираем, откуда брать данные и как подписать режим
     if mode == "global":
         items   = list(message_stats.items())
         mode_ru = "глобально по сообщениям"
@@ -538,34 +572,49 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
             items.append((uid, total, neri))
         mode_ru = "соц. рейтинг (глобальный)"
 
+    elif mode == "casino":
+        # Загружаем монетки из БД: таблица users (или замените на вашу)
+        with db:
+            rows = db.execute(
+                "SELECT id, coins FROM user"
+            ).fetchall()
+        items   = [(r["id"], r["coins"]) for r in rows]
+        mode_ru = "по рыженке"
+
     else:
         items   = []
         mode_ru = mode
 
+    # сортируем, разбиваем на страницы
     sorted_stats = sorted(items, key=lambda kv: kv[1], reverse=True)
     total        = len(sorted_stats)
-    start, end = page * PAGE_SIZE, (page + 1) * PAGE_SIZE
-    last_page = max(math.floor((total - 1) / PAGE_SIZE), 0)
-    print("last_page: ", last_page)
-    chunk = sorted_stats[start:end]
+    start, end   = page * PAGE_SIZE, (page + 1) * PAGE_SIZE
+    last_page    = max((total - 1) // PAGE_SIZE, 0)
+    chunk        = sorted_stats[start:end]
 
+    # формируем текст
     header = f"📊 Топ ({mode_ru.capitalize()}) #{start+1}–{min(end, total)} из {total}:\n"
     lines = [header]
     for rank, entry in enumerate(chunk, start=start+1):
+        # social-режимы имеют тройку (uid, total, neri)
         if mode.startswith("social"):
             uid, full, neri = entry
         else:
             uid, full = entry
             neri = None
 
+        # пытаемся получить имя пользователя
         try:
             uc   = await bot.get_chat(uid)
             name = parse_name(uc)
         except:
             name = escape(str(uid))
 
+        # формируем строку в зависимости от режима
         if mode == "cock":
             lines.append(f"{rank}. {name}: {float(full):.1f} см")
+        elif mode == "casino":
+            lines.append(f"{rank}. {name}: {full} рыженки")
         elif mode.startswith("social"):
             lines.append(f"{rank}. {name}: {full}({neri}) рейтинга")
         else:
@@ -579,8 +628,9 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
         ("cock",          "🍆 Размер"),
     ]
     modes2 = [
-        ("social",        "⚡ Соц. рейтинг"),
+        ("social",       "⚡ Соц. рейтинг"),
         ("social_global","🌍 Соц. рейтинг (всего)"),
+        ("casino",       "🎰 Казино"),
     ]
     mode1_buttons = [
         InlineKeyboardButton(label, callback_data=f"stats:{m}:0")
@@ -600,14 +650,11 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
         nav_buttons.append(
             InlineKeyboardButton("Следующая ▶️", callback_data=f"stats:{mode}:{page+1}")
         )
-    if mode in ("social", "social_global", "cock"):
+    if mode in ("social", "social_global", "cock", "casino"):
         nav_buttons.append(
             InlineKeyboardButton("Последняя", callback_data=f"stats:{mode}:{last_page}")
         )
-    #action_buttons = [
-    #    InlineKeyboardButton("ℹ️ Отслеживать рыжопеча", callback_data=f"follow")
-    #]
-    #kb = InlineKeyboardMarkup([mode_buttons, nav_buttons, action_buttons])
+
     kb = InlineKeyboardMarkup([mode1_buttons, mode2_buttons, nav_buttons])
     return text, kb
 
@@ -1236,12 +1283,15 @@ async def on_message_reaction(mc, event):
 
     receiver = author_id
     entry_name = "additional_chat"
+    multiplier = 1
     if reactor_id == TARGET_USER or reactor_id == ORIG_CHANNEL_ID:
         entry_name = "additional_neri"
+        multiplier = 15
     elif author_id == TARGET_USER:
         entry_name = "additional_self"
         
     entry[entry_name] = entry[entry_name] + delta
+    update_coins(author_id, multiplier * delta)
     save_social_rating()
 
     print(
@@ -1708,6 +1758,7 @@ async def change_social_rating(update: Update, context: CallbackContext):
 
     old = social_rating[target_id]["manual_rating"]
     social_rating[target_id]["manual_rating"] = old + diff
+    update_coins(target_id, diff)
 
     save_social_rating()
     
@@ -1823,8 +1874,204 @@ async def remove_banword(update: Update, context: CallbackContext):
     save_banwords()
     compile_patterns()
 
+async def start_bet(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MODERATORS:
+        return
+
+    text = msg.text or ""
+    parts = text.split(" ", 1)
+    if len(parts) < 2 or not parts[1].strip():
+        return await msg.reply_text(
+            "❌ Использование: /start_bet Вопрос? Опция A;Опция B;Опция C"
+        )
+    payload = parts[1].strip()
+
+    try:
+        question_part, opts_part = payload.split("?", 1)
+        question = question_part.strip() + "?"
+        options  = [o.strip() for o in opts_part.split(";") if o.strip()]
+        if len(options) < 2:
+            raise ValueError()
+    except ValueError:
+        return await msg.reply_text(
+            "❌ Неверный формат. Использование:\n"
+            "/start_bet Вопрос? Опция A;Опция B;Опция C"
+        )
+
+    # insert into your SQLite
+    with db:
+        cur = db.execute(
+            "INSERT INTO poll (question) VALUES (?)",
+            (question,)
+        )
+        poll_id = cur.lastrowid
+
+        for idx, text in enumerate(options):
+            db.execute(
+                "INSERT INTO poll_option (poll_id, idx, option) VALUES (?,?,?)",
+                (poll_id, idx, text)
+            )
+    
+    options_md = "\n".join(f"{i+1}. {opt}" for i, opt in enumerate(options))
+    
+    link = f"https://t.me/{MY_BOT_USERNAME}/{WEB_APP_NAME}?startapp=poll_{poll_id}"
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Сделать ставку 🔗", url=link)
+    ]])
+    
+    await context.bot.send_message(
+        chat_id=ORIG_CHANNEL_ID,
+        text=(
+            f"🎲 *{question}* (#{poll_id})\n\n"
+            f"{options_md}\n\n"
+            "Сделай свою ставку, нажав на кнопку ниже:"
+        ),
+        reply_markup=kb,
+        parse_mode="Markdown"
+    )
+
+    # confirm to the moderator
+    await msg.reply_text(f"✅ Опрос #{poll_id} создан.")
+
+async def close_bet(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    # only moderators
+    if not user or user.id not in MODERATORS:
+        return
+
+    args = context.args or []
+    if len(args) != 1 or not args[0].isdigit():
+        return await msg.reply_text("❌ Использование: /close_bet <poll_id>")
+    poll_id = int(args[0])
+
+    # 1) Check status
+    with db:
+        poll_row = db.execute(
+            "SELECT status FROM poll WHERE id = ?", (poll_id,)
+        ).fetchone()
+        if not poll_row:
+            return await msg.reply_text(f"ℹ️ Опрос #{poll_id} не найден.")
+        if poll_row["status"] != 0:
+            return await msg.reply_text(f"ℹ️ Опрос #{poll_id} уже закрыт ранее.")
+
+        # mark closed (no more new stakes)
+        db.execute("UPDATE poll SET status = 1 WHERE id = ?", (poll_id,))
+    await msg.reply_text(f"⏸ Опрос #{poll_id} закрыт. Новые ставки не принимаются.")
+
+async def finish_bet(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MODERATORS:
+        return
+
+    args = context.args or []
+    if len(args) != 2 or not all(arg.isdigit() for arg in args):
+        return await msg.reply_text(
+            "❌ Использование: /finish_bet <poll_id> <winning_option_idx>"
+        )
+    poll_id, win_idx = map(int, args)
+
+    with db:
+        poll_row = db.execute(
+            "SELECT status, question FROM poll WHERE id = ?",
+            (poll_id,)
+        ).fetchone()
+        if not poll_row:
+            return await msg.reply_text(f"ℹ️ Опрос #{poll_id} не найден.")
+        question = poll_row["question"]
+        if poll_row["status"] == 2:
+            return await msg.reply_text(f"ℹ️ Опрос #{poll_id} уже завершён ранее.")
+
+        opt_row = db.execute(
+            "SELECT option FROM poll_option WHERE poll_id = ? AND idx = ?",
+            (poll_id, win_idx)
+        ).fetchone()
+        if not opt_row:
+            return await msg.reply_text(
+                f"❌ Вариант #{win_idx} не найден в опросе #{poll_id}."
+            )
+        winning_option = opt_row["option"]
+
+        # 3) Загружаем все ставки
+        bets = db.execute(
+            "SELECT user_id, option_idx, amount FROM bets WHERE poll_id = ?",
+            (poll_id,)
+        ).fetchall()
+        # Если ставок не было — сразу отмечаем опрос завершённым
+        if not bets:
+            db.execute(
+                "UPDATE poll SET status = 2, winner_idx = ? WHERE id = ?",
+                (win_idx, poll_id)
+            )
+            return await msg.reply_text(
+                f"ℹ️ Опрос #{poll_id} завершён.\n"
+                f"Вопрос: {question}\n"
+                f"Выиграл вариант: «{winning_option}»\n"
+                "Ставок не было."
+            )
+
+    # 4) Разбиваем на победителей и проигравших
+    winners = [(r["user_id"], r["amount"]) for r in bets if r["option_idx"] == win_idx]
+    losers  = [(r["user_id"], r["amount"]) for r in bets if r["option_idx"] != win_idx]
+    total_win  = sum(a for _, a in winners)
+    total_lose = sum(a for _, a in losers)
+
+    # 5) Отмечаем опрос как завершённый и сохраняем индекс победителя
+    with db:
+        db.execute(
+            "UPDATE poll SET status = 2, winner_idx = ? WHERE id = ?",
+            (win_idx, poll_id)
+        )
+
+    # 6) Если никто не ставил на победивший вариант
+    if total_win == 0:
+        return await context.bot.send_message(
+            chat_id=ORIG_CHANNEL_ID,
+            text=(
+                f"⚠️ Опрос #{poll_id} завершён.\n"
+                f"Вопрос: {question}\n"
+                f"Выиграл вариант: «{winning_option}», "
+                "но на него никто не ставил.\n"
+                f"Общие потери: {total_lose} рыженки."
+            )
+        )
+
+    # 7) Начисляем выплаты
+    payouts = {}
+    for uid, stake in winners:
+        share  = (stake / total_win) * total_lose
+        payout = int(stake + share)
+        update_coins(uid, payout)
+        payouts[uid] = payout
+
+    # 8) Собираем итоговое сообщение
+    lines = [
+        f"🏁 Опрос #{poll_id} завершён!",
+        f"Вопрос: {question}",
+        f"Выиграл вариант: «{winning_option}»",
+        f"Всего ставок: {total_win + total_lose} рыженки "
+        f"(на победу — {total_win}, на поражение — {total_lose})",
+        "",
+        "💰 Выплаты:"
+    ]
+    for uid, amt in payouts.items():
+        lines.append(f"• [ID {uid}]: +{amt} рыженки")
+
+    await context.bot.send_message(
+        chat_id=ORIG_CHANNEL_ID,
+        text="\n".join(lines),
+    )
+
 
 def main():
+    check_init_user_table()
+
     mc = TelegramClient('anon', API_ID, API_HASH)
     
     mc.start(bot_token=BOT_TOKEN)
@@ -1861,8 +2108,11 @@ def main():
     app.add_handler(CommandHandler("sc", change_social_rating))
     app.add_handler(CommandHandler("bw", add_banword))
     app.add_handler(CommandHandler("remove_bw", remove_banword))
+    app.add_handler(CommandHandler("start_bet", start_bet))
+    app.add_handler(CommandHandler("close_bet", close_bet))
+    app.add_handler(CommandHandler("finish_bet", finish_bet))
     
-    app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|social_global|cock):\d+$"))
+    app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|social_global|cock|casino):\d+$"))
     app.add_handler(CallbackQueryHandler(follow_callback, pattern=r"^follow$"))
 
     @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
