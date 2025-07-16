@@ -7,6 +7,9 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+import io
+import matplotlib.pyplot as plt
 
 # Configuration
 database_path = os.getenv("DB_PATH", "info.db")
@@ -190,6 +193,48 @@ def poll_page(request: Request, poll_id: int):
     return templates.TemplateResponse(
         "index.html", {"request": request, "poll_id": poll_id}
     )
+
+# -- API: return pie-chart distribution for a poll --
+@app.get("/api/poll/{poll_id}/chart")
+def get_poll_chart(poll_id: int):
+    # 1) Fetch each option’s total
+    rows = db.execute(
+        """
+        SELECT po.option AS text,
+               COALESCE(SUM(b.amount), 0) AS total
+        FROM poll_option po
+        LEFT JOIN bets b
+          ON po.poll_id = b.poll_id
+         AND po.idx     = b.option_idx
+        WHERE po.poll_id = ?
+        GROUP BY po.idx, po.option
+        """,
+        (poll_id,)
+    ).fetchall()
+
+    if not rows:
+        # Poll doesn’t exist
+        raise HTTPException(status_code=404, detail="Poll not found")
+
+    # 2) Filter out zero-vote slices
+    nonzero = [(r["text"], r["total"]) for r in rows if r["total"] > 0]
+
+    # 3) If no votes at all, serve the default image
+    if not nonzero:
+        raise HTTPException(status_code=404, detail="No votes yet")
+
+    # 4) Draw the pie chart
+    labels, sizes = zip(*nonzero)
+    fig, ax = plt.subplots()
+    ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
+    ax.axis('equal')
+
+    # 5) Stream it back
+    buf = io.BytesIO()
+    plt.savefig(buf, format='PNG', bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/png")
 
 if __name__ == "__main__":
     import uvicorn

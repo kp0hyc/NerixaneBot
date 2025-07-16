@@ -66,6 +66,15 @@
 
   <h1 id="question">Наливаем рыженку...</h1>
   <div id="options"></div>
+  <div id="chart-container" style="margin-top:1.5rem;">
+    <h2>Распределение ставок</h2>
+    <img
+      src="/api/poll/{{ poll_id }}/chart"
+      alt="Pie chart of poll results"
+	  onerror="document.getElementById('chart-container').style.display='none';"
+      style="width:100%;max-width:600px;border:1px solid #ccc;margin-top:0.5rem;"
+    />
+  </div>
 
   <script>
     const tg = window.Telegram.WebApp;
