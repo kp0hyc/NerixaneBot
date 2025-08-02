@@ -113,7 +113,7 @@ DAILY_STATS_DIR.mkdir(exist_ok=True)
 
 TYUMEN = ZoneInfo("Asia/Yekaterinburg")
 EDIT_TIMEOUT = timedelta(hours=48)
-CHAT_AFK_TIMEOUT = timedelta(minutes=15)
+CHAT_AFK_TIMEOUT = timedelta(minutes=30)
 PAGE_SIZE = 10
 
 db = sqlite3.connect("info.db", check_same_thread=False)
@@ -1272,7 +1272,7 @@ async def on_message_reaction(mc, event):
         total = sum(rc.values())
 
         if total >= 50:
-            cap = math.floor(0.2 * total)
+            cap = math.floor(0.1 * total)
             excess = 0
             if prev > cap:
                 print("Too many reacts counted!")
