@@ -6,6 +6,7 @@ from .moderation import *
 from telegram.error import BadRequest, Forbidden, TimedOut
 from telegram import (
     constants,
+    ChatPermissions,
 )
 
 async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -63,7 +64,41 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 print("failed to delete message")
                 pass 
             
-            if not soft:
+            try:
+                member = await context.bot.get_chat_member(update.effective_chat.id, user.id)
+                join_date = member.joined_date
+                print(f"User joined: {join_date}")
+            except Exception as e:
+                print(f"Couldn't fetch join date for user {user.id}: {e}")
+                join_date = None
+
+            now = datetime.now(TYUMEN)
+            force_soft = False
+
+            if join_date:
+                one_month_ago = now - timedelta(days=30)
+                if join_date < one_month_ago:
+                    print(f"User {user.id} joined over a month ago — downgrading to soft.")
+                    force_soft = True
+
+            if soft or force_soft:
+                try:
+                    await context.bot.restrict_chat_member(
+                        chat_id=update.effective_chat.id,
+                        user_id=user.id,
+                        permissions=ChatPermissions(
+                            can_send_messages=True,
+                            can_send_other_messages=False,
+                            can_add_web_page_previews=False,
+                            can_send_documents=False,
+                            can_send_photos=False,
+                            can_send_videos=False,
+                            can_send_video_notes=False,
+                        )
+                    )
+                except BadRequest as e:
+                    print(f"Failed to restrict media for {user.id}: {e}")
+            else:
                 try:
                     await context.bot.ban_chat_member(update.effective_chat.id, user.id)
                 except BadRequest as e:

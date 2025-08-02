@@ -13,6 +13,19 @@ from telegram import (
 )
 from telegram.error import Forbidden
 
+async def get_join_date(client: TelegramClient, chat_id: int, user_id: int):
+    try:
+        res = await client(GetParticipantRequest(
+            channel=chat_id,
+            participant=user_id
+        ))
+        part = res.participant  # this is a ChannelParticipant subclass
+        print("part: ", part)
+        return part.date      # datetime when they joined
+    except Exception as e:
+        print("exception in get_join_date: ", e)
+        return None
+
 async def compute_sha256(bot, file_id):
     bio = await bot.get_file(file_id)
     data = await bio.download_as_bytearray()
