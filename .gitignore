@@ -19,5 +19,7 @@ meta.json
 moderators.json
 query_params.log
 server.log
-social_rating*
+social_rating*.json
 sub_rating.png
+__pycache__
+
