@@ -1,20 +1,21 @@
 from .utils import *
+from.config import MyBotState
 
 from telegram.ext import (
     ContextTypes,
 )
 
 async def persist_stats(context: ContextTypes.DEFAULT_TYPE):
-    save_stats()
-    save_daily_stats()
+    MyBotState.save_stats()
+    MyBotState.save_daily_stats()
     clear_and_save_cocks()
     print("Message stats saved.")
 
 def check_init_user_table():
     row = db.execute("SELECT COUNT(*) AS cnt FROM user").fetchone()
     if row["cnt"] == 0:
-        for uid, info in social_rating.items():
-            total = count_total_rating(social_rating, uid)
+        for uid, info in MyBotState.social_rating.items():
+            total = count_total_rating(MyBotState.social_rating, uid)
             db.execute(
                 "INSERT INTO user (id, coins) VALUES (?, ?)",
                 (uid, total)
@@ -37,17 +38,17 @@ def update_coins(uid, coins):
 async def reset_daily(context: ContextTypes.DEFAULT_TYPE):
     yesterday = (datetime.now(TYUMEN) - timedelta(days=1)).date()
     ypath = daily_path_for_(yesterday)
-    if daily_stats:
-        ypath.write_text(json.dumps(daily_stats, ensure_ascii=False, indent=2))
-    daily_stats.clear()
-    save_daily_stats()
+    if MyBotState.daily_stats:
+        ypath.write_text(json.dumps(MyBotState.daily_stats, ensure_ascii=False, indent=2))
+    MyBotState.daily_stats.clear()
+    MyBotState.save_daily_stats()
     print(f"Rotated daily stats: {yesterday} → {ypath.name}")
 
 def clear_and_save_cocks():
     cutoff = datetime.now() - timedelta(hours=24)
 
     to_delete = []
-    for key, info in last_sizes.items():
+    for key, info in MyBotState.last_sizes.items():
         ts_str = info.get("ts")
         if not ts_str:
             print("WARNING NO TIMESTAMP")
@@ -62,8 +63,8 @@ def clear_and_save_cocks():
             to_delete.append(key)
 
     for key in to_delete:
-        del last_sizes[key]
-    save_last_sizes()
+        del MyBotState.last_sizes[key]
+    MyBotState.save_last_sizes()
 
 async def reset_monthly_social_rating(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(TYUMEN)
@@ -86,14 +87,14 @@ async def reset_monthly_social_rating(context: ContextTypes.DEFAULT_TYPE):
             "boosts":          info["boosts"],
             "manual_rating":   info["manual_rating"],
         }
-        for uid, info in social_rating.items()
+        for uid, info in MyBotState.social_rating.items()
     }
 
     with open(archive_file, "w", encoding="utf-8") as f:
         json.dump(dump, f, ensure_ascii=False, indent=2)
 
-    social_rating.clear()
-    save_social_rating()
-    load_old_social_rating()
+    MyBotState.social_rating.clear()
+    MyBotState.save_social_rating()
+    MyBotState.load_old_social_rating()
 
     print(f"[Monthly reset] Archived to {archive_file} and cleared current social_rating.")

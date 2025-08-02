@@ -1,6 +1,6 @@
 import html
 
-from .config import *
+from .config import MyBotState
 from .utils import *
 
 from telegram import (
@@ -14,34 +14,35 @@ from telegram.ext import (
 async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, InlineKeyboardMarkup]:
     # выбираем, откуда брать данные и как подписать режим
     if mode == "global":
-        items   = list(message_stats.items())
+        items   = list(MyBotState.message_stats.items())
         mode_ru = "глобально по сообщениям"
 
     elif mode == "daily":
-        items   = list(daily_stats.items())
+        items   = list(MyBotState.daily_stats.items())
         mode_ru = "сегодня"
 
     elif mode == "cock":
-        items   = [(uid, info["size"]) for uid, info in last_sizes.items()]
+        items   = [(uid, info["size"]) for uid, info in MyBotState.last_sizes.items()]
         mode_ru = "по размеру"
 
     elif mode == "social":
         items = []
-        for uid, info in social_rating.items():
+        print("Social rating: ", MyBotState.social_rating)
+        for uid, info in MyBotState.social_rating.items():
             if uid == TARGET_USER:
                 continue
-            total = count_total_rating(social_rating, uid)
-            neri  = count_neri_rating(social_rating, uid)
+            total = count_total_rating(MyBotState.social_rating, uid)
+            neri  = count_neri_rating(MyBotState.social_rating, uid)
             items.append((uid, total, neri))
         mode_ru = "соц. рейтинг (текущий)"
 
     elif mode == "social_global":
         items = []
-        for uid, info in old_social_rating.items():
+        for uid, info in MyBotState.old_social_rating.items():
             if uid == TARGET_USER:
                 continue
-            total = count_total_rating(old_social_rating, uid) + count_total_rating(social_rating, uid)
-            neri  = count_neri_rating(old_social_rating, uid) + count_neri_rating(social_rating, uid)
+            total = count_total_rating(MyBotState.old_social_rating, uid) + count_total_rating(MyBotState.social_rating, uid)
+            neri  = count_neri_rating(MyBotState.old_social_rating, uid) + count_neri_rating(MyBotState.social_rating, uid)
             items.append((uid, total, neri))
         mode_ru = "соц. рейтинг (глобальный)"
 

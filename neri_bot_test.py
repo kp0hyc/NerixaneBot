@@ -1,6 +1,7 @@
 from modules.commands import *
 from modules.root import *
 from modules.social_rating import *
+from modules.config import MyBotState
 
 from datetime import time
 
@@ -69,7 +70,7 @@ def main():
         for msg_id in event.deleted_ids:
             await delete_forwards(app.bot, ORIG_CHANNEL_ID, msg_id)
         
-        save_forward_map()
+        MyBotState.save_forward_map()
     
     @mc.on(events.MessageEdited(chats=ORIG_CHANNEL_ID))
     async def on_edited(event):

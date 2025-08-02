@@ -1,7 +1,8 @@
 import hashlib
 import random
 
-from .config import *
+from .bot_state import *
+from .config import MyBotState
 
 from typing import Callable, Awaitable
 
@@ -134,15 +135,15 @@ def extract_media_signature(msg):
 async def check_afk_time(bot, user, chat_id):
     now = datetime.now()
 
-    last_time = META_INFO.get("last_message_time", now)
-    first_time = META_INFO.get("first_message_time", last_time)
+    last_time = MyBotState.META_INFO.get("last_message_time", now)
+    first_time = MyBotState.META_INFO.get("first_message_time", last_time)
 
     delta_dead = now - last_time
     delta_alive = last_time - first_time
 
-    prev_dead_secs = META_INFO.get("afk_time", 0)
+    prev_dead_secs = MyBotState.META_INFO.get("afk_time", 0)
     prev_dead_td = timedelta(seconds=prev_dead_secs)
-    prev_alive_secs = META_INFO.get("alive_time", 0)
+    prev_alive_secs = MyBotState.META_INFO.get("alive_time", 0)
     prev_alive_td = timedelta(seconds=prev_alive_secs)
 
     print(f"AFK check: now={now}, last_time={last_time}, first_time={first_time}")
@@ -161,7 +162,7 @@ async def check_afk_time(bot, user, chat_id):
                 f"Чат был мёртв {format_duration(delta_dead)} "
                 f"(предыдущий рекорд — {format_duration(prev_dead_td)})."
             )
-            META_INFO["afk_time"] = int(delta_dead.total_seconds())
+            MyBotState.META_INFO["afk_time"] = int(delta_dead.total_seconds())
         else:
             dead_info = f"⏱ Чат был мёртв {format_duration(delta_dead)}."
 
@@ -171,7 +172,7 @@ async def check_afk_time(bot, user, chat_id):
                 f"Вы срали непрерывно {format_duration(delta_alive)} "
                 f"(предыдущий рекорд — {format_duration(prev_alive_td)})."
             )
-            META_INFO["alive_time"] = int(delta_alive.total_seconds())
+            MyBotState.META_INFO["alive_time"] = int(delta_alive.total_seconds())
         else:
             alive_info = f"Чат был жив {format_duration(delta_alive)}."
 
@@ -179,10 +180,10 @@ async def check_afk_time(bot, user, chat_id):
         text = "\n\n".join([dead_info, alive_info, reanim_info])
         await bot.send_message(chat_id, text, parse_mode="HTML")
 
-        META_INFO["first_message_time"] = now
+        MyBotState.META_INFO["first_message_time"] = now
 
-    META_INFO["last_message_time"] = now
-    save_meta_info()
+    MyBotState.META_INFO["last_message_time"] = now
+    MyBotState.save_meta_info()
 
 async def subscribe_flow_(
     user_id: int,
@@ -190,7 +191,7 @@ async def subscribe_flow_(
     send_dm: Callable[[str], Awaitable],
     reply_in_chat: Callable[[str], Awaitable],
 ):
-    if user_id in SUBSCRIBERS:
+    if user_id in MyBotState.SUBSCRIBERS:
         try:
             await send_dm("🎉 Всё настроено, сообщения будут приходить сюда!")
             await reply_in_chat("✅ Вы уже сталкерите Рыжопеча.")
@@ -200,8 +201,8 @@ async def subscribe_flow_(
                 "Пожалуйста отправь /start мне в ЛС."
             )
     else:
-        SUBSCRIBERS.add(user_id)
-        save_subscribers(SUBSCRIBERS)
+        MyBotState.SUBSCRIBERS.add(user_id)
+        MyBotState.save_subscribers(MyBotState.SUBSCRIBERS)
 
         await reply_in_chat("🎉 Поздравляю, теперь ты сталкеришь Рыжопеча!")
         try:

@@ -2,6 +2,7 @@ import asyncio
 import re
 
 from .moderation import *
+from .config import MyBotState
 
 from telegram.error import BadRequest, Forbidden, TimedOut
 from telegram import (
@@ -127,13 +128,13 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for member in msg.new_chat_members:
             user_id = member.id
             print(f"New user joined: {user_id} ({member.username})")
-            if user_id in SUBSCRIBERS:
+            if user_id in MyBotState.SUBSCRIBERS:
                 await update_all_messages(context.bot, user_id)
     
     print(update)
 
-    message_stats[user.id] = message_stats.get(user.id, 0) + 1
-    daily_stats[user.id] = daily_stats.get(user.id, 0) + 1
+    MyBotState.message_stats[user.id] = MyBotState.message_stats.get(user.id, 0) + 1
+    MyBotState.daily_stats[user.id] = MyBotState.daily_stats.get(user.id, 0) + 1
     
     fd = getattr(msg, "forward_date", None)
     if fd is None and hasattr(msg, "api_kwargs"):
@@ -146,11 +147,11 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if m:
                 size = float(m.group(1))
                 ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                last_sizes[user.id] = {"size": size, "ts": ts}
-                save_last_sizes()
+                MyBotState.last_sizes[user.id] = {"size": size, "ts": ts}
+                MyBotState.save_last_sizes()
 
-    if not user.id in social_rating:
-        social_rating[user.id] = {
+    if not user.id in MyBotState.social_rating:
+        MyBotState.social_rating[user.id] = {
             "reactor_counts": {},
             "total_reacts":    0,
             "additional_chat": 0,
@@ -159,15 +160,15 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "boosts":          0,
             "manual_rating":   0,
         }
-        save_social_rating()
+        MyBotState.save_social_rating()
 
     bc = getattr(msg, "sender_boost_count", None)
     if bc is None and hasattr(msg, "api_kwargs"):
         bc = msg.api_kwargs.get("sender_boost_count", 0)
     boost_count = int(bc or 0)
-    if social_rating[user.id]["boosts"] != boost_count:
-        social_rating[user.id]["boosts"] = boost_count
-        save_social_rating()
+    if MyBotState.social_rating[user.id]["boosts"] != boost_count:
+        MyBotState.social_rating[user.id]["boosts"] = boost_count
+        MyBotState.save_social_rating()
     
     await check_afk_time(context.bot, user, update.effective_chat.id)
     
@@ -192,7 +193,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await broadcast(orig_chat, orig_msg, text, has_media, context.bot)
 
-    save_forward_map()
+    MyBotState.save_forward_map()
     
     via = update.message.via_bot
     if not (via and via.username == COCKBOT_USERNAME):
@@ -221,8 +222,8 @@ async def broadcast(orig_chat_id, orig_msg_id, text, has_media, bot):
     kb = await make_link_keyboard(orig_chat_id, orig_msg_id, bot)
     join_chat = await make_chat_invite_keyboard()
 
-    if (orig_chat_id, orig_msg_id) not in forward_map:
-        forward_map[(orig_chat_id, orig_msg_id)] = {
+    if (orig_chat_id, orig_msg_id) not in MyBotState.forward_map:
+        MyBotState.forward_map[(orig_chat_id, orig_msg_id)] = {
             "text": text,
             "has_media": has_media,
             "forwards": [],
@@ -230,7 +231,7 @@ async def broadcast(orig_chat_id, orig_msg_id, text, has_media, bot):
         }
 
     mention_list = []
-    for subscriber_id in list(SUBSCRIBERS):
+    for subscriber_id in list(MyBotState.SUBSCRIBERS):
         print('Forwarding!')
         try:
             member = await bot.get_chat_member(orig_chat_id, subscriber_id)
@@ -246,7 +247,7 @@ async def broadcast(orig_chat_id, orig_msg_id, text, has_media, bot):
                     text="Рыжопеч опубликовала новое сообщение в чате, но вы должны быть его участником, чтобы видеть содержимое!",
                     reply_markup=join_chat
                 )
-                forward_map[(orig_chat_id, orig_msg_id)]["forwards"].append((subscriber_id, fwd.message_id, False))
+                MyBotState.forward_map[(orig_chat_id, orig_msg_id)]["forwards"].append((subscriber_id, fwd.message_id, False))
                 continue
 
             fwd = await bot.copy_message(
@@ -255,11 +256,11 @@ async def broadcast(orig_chat_id, orig_msg_id, text, has_media, bot):
                 message_id=orig_msg_id,
                 reply_markup=kb
             )
-            forward_map[(orig_chat_id, orig_msg_id)]["forwards"].append((subscriber_id, fwd.message_id, True))
+            MyBotState.forward_map[(orig_chat_id, orig_msg_id)]["forwards"].append((subscriber_id, fwd.message_id, True))
 
         except Forbidden:
-            SUBSCRIBERS.remove(subscriber_id)
-            save_subscribers(SUBSCRIBERS)
+            MyBotState.SUBSCRIBERS.remove(subscriber_id)
+            MyBotState.save_subscribers(MyBotState.SUBSCRIBERS)
             print(f"Removed {subscriber_id}: never initiated conversation")
             try:
                 chat = await bot.get_chat(subscriber_id)
@@ -300,7 +301,7 @@ async def broadcast(orig_chat_id, orig_msg_id, text, has_media, bot):
 async def update_all_messages(bot, user_id):
     now = datetime.utcnow()
 
-    for (orig_id, orig_msg), entry in forward_map.items():
+    for (orig_id, orig_msg), entry in MyBotState.forward_map.items():
         forwards = entry["forwards"]
         user_forward = next((fwd for fwd in entry["forwards"] if fwd[0] == user_id), None)
         if not user_forward:
@@ -364,7 +365,7 @@ async def edit_forwards(bot, event, orig_id, orig_msg):
     has_media = msg.media is not None
 
     key = (orig_id, orig_msg)
-    entry = forward_map.get(key)
+    entry = MyBotState.forward_map.get(key)
     if not entry:
         return
 
@@ -382,7 +383,7 @@ async def edit_forwards(bot, event, orig_id, orig_msg):
 
 async def delete_forwards(bot, orig_chat, orig_msg):
     key = (orig_chat, orig_msg)
-    entry = forward_map.get(key)
+    entry = MyBotState.forward_map.get(key)
 
     if not entry:
         return
@@ -399,4 +400,4 @@ async def delete_forwards(bot, orig_chat, orig_msg):
         except Exception as e:
             print(f"Unexpected error deleting message: {e}")
 
-    forward_map.pop(key, None)
+    MyBotState.forward_map.pop(key, None)

@@ -1,4 +1,5 @@
 from .utils import *
+from .config import MyBotState
 
 from telegram import (
     Update,
@@ -8,35 +9,36 @@ from telegram.ext import (
 )
 
 def check_banwords(text):
+    print("len: ", len(MyBotState.patterns_))
     norm = normalize(text)
     #print("norm: ", norm)
-    for pat in patterns_:
+    for pat in MyBotState.patterns_:
         if pat.search(norm):
             return True
     return False
 
 def add_ban_rule(sig: dict):
     rule = {k: v for k, v in sig.items() if v is not None}
-    banlist.append(rule)
-    save_banlist()
+    MyBotState.banlist.append(rule)
+    MyBotState.save_banlist()
 
 async def is_banned_media(sig: dict, file_id, bot):
     pack = sig.get("sticker_set_name")
     print("pack: ", pack)
     if pack:
-        for rule in banlist:
+        for rule in MyBotState.banlist:
             if rule.get("sticker_set_name") == pack:
                 return True, rule.get("soft", False)
         return False, False
 
     uid = sig.get("file_unique_id")
     if uid:
-        for rule in banlist:
+        for rule in MyBotState.banlist:
             if rule.get("file_unique_id") == uid:
                 return True, rule.get("soft", False)
 
     meta_keys = ["mime_type", "duration", "width", "height", "file_size"]
-    for rule in banlist:
+    for rule in MyBotState.banlist:
         if all(
             rule.get(k) is None or rule[k] == sig.get(k)
             for k in meta_keys
@@ -65,7 +67,7 @@ async def add_media_to_block(update: Update, context: ContextTypes.DEFAULT_TYPE,
     user = update.effective_user
     msg  = update.effective_message
 
-    if not user or user.id not in MODERATORS:
+    if not user or user.id not in MyBotState.MODERATORS:
         return
 
     reply = msg.reply_to_message
@@ -104,7 +106,7 @@ async def add_media_to_block(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
     # Проверяем, нет ли уже в банлисте
     meta_keys = ["mime_type", "duration", "width", "height", "file_size"]
-    for rule in banlist:
+    for rule in MyBotState.banlist:
         # 1) по названию набора стикеров
         if sig.get("sticker_set_name") and rule.get("sticker_set_name") == sig["sticker_set_name"]:
             await msg.reply_text("ℹ️ Этот стикер/пак уже в банлисте (по названию набора).")
@@ -136,7 +138,7 @@ async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     msg  = update.effective_message
 
-    if not user or user.id not in MODERATORS:
+    if not user or user.id not in MyBotState.MODERATORS:
         return
 
     reply = msg.reply_to_message
@@ -172,7 +174,7 @@ async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     removed = 0
     new_rules = []
 
-    for rule in banlist:
+    for rule in MyBotState.banlist:
         if sig.get("sticker_set_name") and rule.get("sticker_set_name") == sig["sticker_set_name"]:
             removed += 1
             continue
@@ -191,8 +193,8 @@ async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_rules.append(rule)
 
     if removed:
-        banlist[:] = new_rules
-        save_banlist()
+        MyBotState.banlist[:] = new_rules
+        MyBotState.save_banlist()
         await msg.reply_text(f"✅ Удалено {removed} правил из банлиста.")
     else:
         await msg.reply_text("ℹ️ Не найдено совпадающих правил в банлисте.")

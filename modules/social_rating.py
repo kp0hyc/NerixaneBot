@@ -2,6 +2,7 @@ import math
 import unicodedata
 
 from .updates import *
+from .config import MyBotState
 
 from datetime import timezone
 
@@ -57,7 +58,7 @@ async def on_message_reaction(mc, event):
     print("author_id: ", author_id)
     print("reactor_id: ", reactor_id)
     
-    if reactor_id != ORIG_CHANNEL_ID and count_total_rating(social_rating, reactor_id) < -100:
+    if reactor_id != ORIG_CHANNEL_ID and count_total_rating(MyBotState.social_rating, reactor_id) < -100:
         print("too low social rating")
         return
 
@@ -93,7 +94,7 @@ async def on_message_reaction(mc, event):
         print("delta is zero, we quit")
         return
 
-    entry = social_rating.setdefault(author_id, {
+    entry = MyBotState.social_rating.setdefault(author_id, {
         "reactor_counts": {},
         "total_reacts":    0,
         "additional_chat": 0,
@@ -134,7 +135,7 @@ async def on_message_reaction(mc, event):
         
     entry[entry_name] = entry[entry_name] + delta
     update_coins(author_id, multiplier * delta)
-    save_social_rating()
+    MyBotState.save_social_rating()
 
     print(
         f"[Reactions] msg#{msg_id} for user {author_id} by user {reactor_id}: "
@@ -157,24 +158,24 @@ def get_emoji_weight(e: str) -> int:
     with and without the VARIATION SELECTOR-16 (U+FE0F).
     """
     # First try exactly as‐is
-    if e in emoji_weights:
-        return emoji_weights[e]
+    if e in MyBotState.emoji_weights:
+        return MyBotState.emoji_weights[e]
 
     # Normalize to NFC (just in case)
     e_nfc = unicodedata.normalize("NFC", e)
-    if e_nfc != e and e_nfc in emoji_weights:
-        return emoji_weights[e_nfc]
+    if e_nfc != e and e_nfc in MyBotState.emoji_weights:
+        return MyBotState.emoji_weights[e_nfc]
 
     # Try adding VS16 if it’s missing
     VS16 = "\uFE0F"
     if not e_nfc.endswith(VS16):
         cand = e_nfc + VS16
-        if cand in emoji_weights:
-            return emoji_weights[cand]
+        if cand in MyBotState.emoji_weights:
+            return MyBotState.emoji_weights[cand]
     else:
         # Or stripping it
         cand = e_nfc.rstrip(VS16)
-        if cand in emoji_weights:
-            return emoji_weights[cand]
+        if cand in MyBotState.emoji_weights:
+            return MyBotState.emoji_weights[cand]
 
     return 0

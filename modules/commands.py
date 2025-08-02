@@ -3,6 +3,7 @@ import sys
 from .top import *
 from .updates import *
 from .casino import *
+from .config import MyBotState
 
 from telegram import (
     MessageEntity,
@@ -30,9 +31,9 @@ async def unsubscribe(update: Update, context: CallbackContext):
     if not user:
         return
     uid = user.id
-    if uid in SUBSCRIBERS:
-        SUBSCRIBERS.remove(uid)
-        save_subscribers(SUBSCRIBERS)
+    if uid in MyBotState.SUBSCRIBERS:
+        MyBotState.SUBSCRIBERS.remove(uid)
+        MyBotState.save_subscribers(MyBotState.SUBSCRIBERS)
         await update.message.reply_text("⚠️ Вы покинули клуб сталкеров Рыжопеча.")
     else:
         await update.message.reply_text("ℹ️ Так ты и не следил, чел...")
@@ -55,7 +56,7 @@ async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
         reply_markup=kb
     )
-    stats_sessions[sent.message_id] = update.effective_user.id
+    MyBotState.stats_sessions[sent.message_id] = update.effective_user.id
 
 
 async def show_rating(update: Update, context: CallbackContext):
@@ -63,24 +64,24 @@ async def show_rating(update: Update, context: CallbackContext):
 
 async def shutdown_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if not user or user.id not in MODERATORS:
+    if not user or user.id not in MyBotState.MODERATORS:
         return
 
     await update.message.reply_text("🔌 Shutting down, saving stats…")
 
-    save_stats()
-    save_daily_stats()
+    MyBotState.save_stats()
+    MyBotState.save_daily_stats()
     clear_and_save_cocks()
-    save_meta_info()
+    MyBotState.save_meta_info()
 
     sys.exit(0)
 
 async def edit_weights_cmd(update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if not user or user.id not in MODERATORS:
+    if not user or user.id not in MyBotState.MODERATORS:
         return
 
-    dump = json.dumps(emoji_weights, ensure_ascii=False, indent=2)
+    dump = json.dumps(MyBotState.emoji_weights, ensure_ascii=False, indent=2)
     
     sent = await update.message.reply_text(dump)
     context.user_data["weights_msg_id"] = sent.message_id
@@ -89,7 +90,7 @@ async def edit_weights_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user = update.effective_user
     msg  = update.effective_message
 
-    if not user or user.id not in MODERATORS:
+    if not user or user.id not in MyBotState.MODERATORS:
         return
     parent = msg.reply_to_message
     if not parent or parent.message_id != context.user_data.get("weights_msg_id"):
@@ -117,8 +118,8 @@ async def edit_weights_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return await msg.reply_text("ℹ️ Вторая часть должна быть числом.")
 
     # update & save
-    emoji_weights[key] = weight
-    save_emoji_weights()
+    MyBotState.emoji_weights[key] = weight
+    MyBotState.save_emoji_weights()
 
     await msg.reply_text(f"✅ Обновлено: {key} → {weight}")
 
@@ -151,8 +152,8 @@ async def change_social_rating(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Вторым аргументом должно быть число, например +5 или -2.")
         return
 
-    if target_id not in social_rating:
-        social_rating[target_id] = {
+    if target_id not in MyBotState.social_rating:
+        MyBotState.social_rating[target_id] = {
             "additional_chat": 0,
             "additional_neri": 0,
             "additional_self": 0,
@@ -160,11 +161,11 @@ async def change_social_rating(update: Update, context: CallbackContext):
             "manual_rating": 0,
         }
 
-    old = social_rating[target_id]["manual_rating"]
-    social_rating[target_id]["manual_rating"] = old + diff
+    old = MyBotState.social_rating[target_id]["manual_rating"]
+    MyBotState.social_rating[target_id]["manual_rating"] = old + diff
     update_coins(target_id, diff)
 
-    save_social_rating()
+    MyBotState.save_social_rating()
     
     word = "получил"
     social_rating_image = SOCIAL_ADD_RATING_IMAGE
@@ -194,7 +195,7 @@ async def add_banword(update: Update, context: CallbackContext):
     user = update.effective_user
     msg  = update.effective_message
 
-    if not user or user.id not in MODERATORS:
+    if not user or user.id not in MyBotState.MODERATORS:
         return
 
     if not context.args:
@@ -203,8 +204,8 @@ async def add_banword(update: Update, context: CallbackContext):
 
     new_words = {w.strip().lower() for w in context.args if w.strip()}
 
-    added = new_words - BANWORDS
-    BANWORDS.update(added)
+    added = new_words - MyBotState.BANWORDS
+    MyBotState.BANWORDS.update(added)
 
     if added:
         await msg.reply_text(
@@ -213,14 +214,14 @@ async def add_banword(update: Update, context: CallbackContext):
         )
     else:
         await msg.reply_text("Все эти слова уже в списке.")
-    save_banwords()
-    compile_patterns()
+    MyBotState.save_banwords()
+    MyBotState.compile_patterns()
 
 async def remove_banword(update: Update, context: CallbackContext):
     user = update.effective_user
     msg  = update.effective_message
 
-    if not user or user.id not in MODERATORS:
+    if not user or user.id not in MyBotState.MODERATORS:
         return
 
     if not context.args:
@@ -229,10 +230,10 @@ async def remove_banword(update: Update, context: CallbackContext):
 
     requested = {w.strip().lower() for w in context.args if w.strip()}
 
-    present    = requested & BANWORDS
-    not_found  = requested - BANWORDS
+    present    = requested & MyBotState.BANWORDS
+    not_found  = requested - MyBotState.BANWORDS
 
-    BANWORDS.difference_update(present)
+    MyBotState.BANWORDS.difference_update(present)
 
     if present:
         await msg.reply_text(
@@ -242,15 +243,15 @@ async def remove_banword(update: Update, context: CallbackContext):
         )
     else:
         await msg.reply_text("Ни одно из указанных слов не было в списке бан-слов.")
-    save_banwords()
-    compile_patterns()
+    MyBotState.save_banwords()
+    MyBotState.compile_patterns()
 
 async def start_bet(update: Update, context: CallbackContext):
     print("starting bet")
     user = update.effective_user
     msg  = update.effective_message
 
-    if not user or user.id not in MODERATORS:
+    if not user or user.id not in MyBotState.MODERATORS:
         return
 
     text = msg.text or ""
@@ -311,7 +312,7 @@ async def close_bet(update: Update, context: CallbackContext):
     msg  = update.effective_message
 
     # only moderators
-    if not user or user.id not in MODERATORS:
+    if not user or user.id not in MyBotState.MODERATORS:
         return
 
     args = context.args or []
@@ -337,7 +338,7 @@ async def finish_bet(update: Update, context: CallbackContext):
     user = update.effective_user
     msg  = update.effective_message
 
-    if not user or user.id not in MODERATORS:
+    if not user or user.id not in MyBotState.MODERATORS:
         return
 
     args = context.args or []
