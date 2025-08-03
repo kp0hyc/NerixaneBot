@@ -46,6 +46,10 @@ def parse_name(uc):
         return escape(f"@{uc.username}")
     return escape(str(uc.id))
 
+def parse_mention(user):
+    full_name = parse_name(user)
+    return f'<a href="tg://user?id={user.id}">{full_name}</a>'
+
 def count_total_rating(sr, uid):
     if uid not in sr:
         return 0

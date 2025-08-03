@@ -29,6 +29,7 @@ def update_coins(uid, coins):
         ).fetchone()
         current = row["coins"] if row else 0
         new_balance = current + coins
+        print(f"Updating coins for {uid}: {current} → {new_balance}; change: {coins}")
         db.execute(
             "INSERT INTO user (id, coins) VALUES (?, ?) "
             "ON CONFLICT(id) DO UPDATE SET coins = excluded.coins",

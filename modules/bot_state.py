@@ -146,6 +146,7 @@ class BotState:
         cls.social_rating = {}
         cls.old_social_rating = {}
         cls.emoji_weights = {}
+        cls.slot = True
         
         cls.load_forward_map()
         cls.load_banlist()

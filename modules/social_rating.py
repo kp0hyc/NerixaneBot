@@ -115,7 +115,7 @@ async def on_message_reaction(mc, event):
         total_count = sum(d["count"] for d in rc.values())
 
         if total_count >= 50:
-            cap = math.floor(0.1 * total_count)
+            cap = math.floor(0.25 * total_count)
             if prev_count > cap:
                 print("Too many reacts counted!")
                 return

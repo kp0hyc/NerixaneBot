@@ -62,6 +62,9 @@ def main():
     app.add_handler(CommandHandler("start_bet", start_bet))
     app.add_handler(CommandHandler("close_bet", close_bet))
     app.add_handler(CommandHandler("finish_bet", finish_bet))
+    app.add_handler(CommandHandler("slot", slot_command))
+    app.add_handler(CommandHandler("stop_slot", stop_slot_command))
+    app.add_handler(CommandHandler("resume_slot", resume_slot_command))
     
     app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|social_global|cock|casino):\d+$"))
     app.add_handler(CallbackQueryHandler(follow_callback, pattern=r"^follow$"))

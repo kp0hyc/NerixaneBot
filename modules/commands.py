@@ -1,3 +1,4 @@
+import asyncio
 import sys
 
 from .top import *
@@ -508,3 +509,132 @@ async def finish_bet(update: Update, context: CallbackContext):
         text="\n".join(lines),
         parse_mode=constants.ParseMode.HTML,
     )
+
+async def slot_command(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+    if not user:
+        return
+
+    if not MyBotState.slot:
+        warning = await msg.reply_text(
+            "❌ Слот машина сейчас не работает. "
+            "Попроси модераторов запустить её."
+        )
+        asyncio.create_task(
+            delete_slot_messages_later([msg, warning], delay=5)
+        )
+        return
+
+    args = context.args or []
+    if args:
+        if not args[0].isdigit():
+            warning = await msg.reply_text("❌ Использование: /slot [число]")
+            asyncio.create_task(
+                delete_slot_messages_later([msg, warning], delay=5)
+            )
+            return
+        stake = int(args[0])
+    else:
+        stake = 10
+
+    row = db.execute(
+        "SELECT coins FROM user WHERE id = ?",
+        (user.id,)
+    ).fetchone()
+    balance = row["coins"] if row else 0
+    if balance < stake:
+        warning = await msg.reply_text(
+            f"❌ Недостаточно рыженки: на счету {balance}, требуется {stake}."
+        )
+        
+        asyncio.create_task(
+            delete_slot_messages_later(
+                [msg, warning],
+                delay=5
+            )
+        )
+        return
+
+    update_coins(user.id, -stake)
+
+    slot_msg = await msg.reply_dice(emoji="🎰")
+    res = slot_msg.dice.value - 1
+
+    v0 = (res >> 4) & 0b11
+    v1 = (res >> 2) & 0b11
+    v2 = res         & 0b11
+
+    print(f"Slot result: {v0}, {v1}, {v2}")
+    word = "ничего"
+    if v0 == v1 == v2:
+        mult = {1:5, 2:10, 0:15, 3:30}[v0]
+        word = {1:"виноград", 2:"лимоны", 0:"слитки", 3:"топоры"}[v0]
+    else:
+        mult = 0
+
+    new_balance = balance - stake + mult * stake
+
+    name = parse_mention(user)
+
+    if mult:
+        payout = stake * mult
+        update_coins(user.id, payout)
+        result_text = (
+            f"🎉 Ура! {name} налетел на «{word}» и помжножил свою ставку в "
+            f"{mult} раз — всего +{payout} рыженки!"
+            f" Баланс: {new_balance} рыженки"
+        )
+    else:
+        result_text = (
+            f"💔 Увы, {name} проиграл ставку в {stake} рыженки."
+            f" Баланс: {new_balance} рыженки"
+        )
+
+    result_msg = await msg.reply_text(
+        text=result_text,
+        parse_mode=constants.ParseMode.HTML
+    )
+    if not mult:
+        asyncio.create_task(
+            delete_slot_messages_later(
+                [msg, slot_msg, result_msg],
+                delay=30
+            )
+        )
+
+async def stop_slot_command(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg = update.effective_message
+    
+    if not user or user.id not in MyBotState.MODERATORS:
+        return
+    
+    MyBotState.slot = False
+    res = await msg.reply_text("✅ Слот машина остановлена.")
+
+    asyncio.create_task(
+        delete_slot_messages_later([msg, res], delay=5)
+    )
+
+async def resume_slot_command(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg = update.effective_message
+    
+    if not user or user.id not in MyBotState.MODERATORS:
+        return
+    
+    MyBotState.slot = True
+    res = await msg.reply_text("✅ Слот машина возобновлена.")
+
+    asyncio.create_task(
+        delete_slot_messages_later([msg, res], delay=5)
+    )
+
+async def delete_slot_messages_later(messages, delay: int):
+    await asyncio.sleep(delay)
+    for m in messages:
+        try:
+            await m.delete()
+        except:
+            pass
