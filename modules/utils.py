@@ -4,6 +4,7 @@ import random
 from .bot_state import *
 from .config import MyBotState
 
+from telethon.tl.functions.channels import GetParticipantRequest
 from typing import Callable, Awaitable
 
 from html import escape
@@ -49,7 +50,21 @@ def count_total_rating(sr, uid):
     if uid not in sr:
         return 0
     info = sr[uid]
-    return info.get("additional_chat", 0) + info.get("additional_neri", 0) * 15 + info.get("boosts", 0) * 5 + info.get("manual_rating", 0)
+
+    total = (
+        info.get("additional_chat", 0)
+        + info.get("additional_neri", 0) * 15
+        + info.get("boosts", 0) * 5
+        + info.get("manual_rating", 0)
+    )
+
+    total += sum(
+        entry.get("value", 0)
+        for reactor_id, entry in info.get("reactor_counts", {}).items()
+        if not sr.get(reactor_id, {}).get("banned", False)
+    )
+
+    return total
 
 def count_neri_rating(sr, uid):
     if uid not in sr:

@@ -27,7 +27,6 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
 
     elif mode == "social":
         items = []
-        print("Social rating: ", MyBotState.social_rating)
         for uid, info in MyBotState.social_rating.items():
             if uid == TARGET_USER:
                 continue

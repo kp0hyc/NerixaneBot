@@ -123,6 +123,68 @@ async def edit_weights_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await msg.reply_text(f"✅ Обновлено: {key} → {weight}")
 
+async def ban_sc_user(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MyBotState.MODERATORS:
+        return
+    
+    if not context.args:
+        await msg.reply_text("Использование: /ban_sc_user uid")
+        return
+    
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await msg.reply_text("❌ Вторым аргументом должно быть число, например /ban_sc_user 123456789")
+        return
+
+    try:
+        user_chat = await context.bot.get_chat(target_id)
+        name = parse_name(user_chat)
+    except Exception:
+        name = f"[ID {target_id}]"
+    if target_id not in MyBotState.social_rating:
+        await msg.reply_text(f"ℹ️ Пользователь {name} не найден в соц. рейтинге.")
+        return
+    
+    MyBotState.social_rating[target_id]["banned"] = True
+    MyBotState.save_social_rating()
+
+    await msg.reply_text(f"✅ Пользователь {name} заблокирован в соц. рейтинге.")
+
+async def unban_sc_user(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MyBotState.MODERATORS:
+        return
+    
+    if not context.args:
+        await msg.reply_text("Использование: /unban_sc_user uid")
+        return
+    
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await msg.reply_text("❌ Вторым аргументом должно быть число, например /unban_sc_user 123456789")
+        return
+
+    try:
+        user_chat = await context.bot.get_chat(target_id)
+        name = parse_name(user_chat)
+    except Exception:
+        name = f"[ID {target_id}]"
+    if target_id not in MyBotState.social_rating:
+        await msg.reply_text(f"ℹ️ Пользователь {name} не найден в соц. рейтинге.")
+        return
+    
+    MyBotState.social_rating[target_id]["banned"] = False
+    MyBotState.save_social_rating()
+
+    await msg.reply_text(f"✅ Пользователь {name} разблокирован в соц. рейтинге.")
+
 async def change_social_rating(update: Update, context: CallbackContext):
     caller = update.effective_user
     if not caller or caller.id != TARGET_USER:

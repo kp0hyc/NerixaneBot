@@ -103,44 +103,80 @@ async def on_message_reaction(mc, event):
         "boosts":          0,
         "manual_rating":   0,
     })
-    
-    if reactor_id != TARGET_USER and reactor_id != ORIG_CHANNEL_ID and author_id != TARGET_USER:
+
+    if reactor_id not in (TARGET_USER, ORIG_CHANNEL_ID) and author_id != TARGET_USER:
         rc = entry["reactor_counts"]
-        prev = rc.get(reactor_id, 0)
+        reactor_data = rc.setdefault(
+            reactor_id,
+            {"count": 0, "value": 0, "reactor_dates": []}
+        )
 
-        total = sum(rc.values())
+        prev_count  = reactor_data["count"]
+        total_count = sum(d["count"] for d in rc.values())
 
-        if total >= 50:
-            cap = math.floor(0.1 * total)
-            excess = 0
-            if prev > cap:
+        if total_count >= 50:
+            cap = math.floor(0.1 * total_count)
+            if prev_count > cap:
                 print("Too many reacts counted!")
                 return
 
-        rc[reactor_id] = prev + 1
-        entry["total_reacts"] = total + 1
-    
-    print("delta: ", delta)
-    if delta == 0:
-        return  # nothing to change
+        now = datetime.utcnow()
+        raw_dates = reactor_data.get("reactor_dates", [])
+        parsed = []
+        for ts in raw_dates:
+            if isinstance(ts, str):
+                try:
+                    parsed.append(datetime.fromisoformat(ts))
+                except ValueError:
+                    continue
+            elif isinstance(ts, datetime):
+                parsed.append(ts)
+        parsed.sort(reverse=True)
 
-    receiver = author_id
-    entry_name = "additional_chat"
+        # 3rd most recent must be ≥1 min ago
+        if len(parsed) >= 3 and (now - parsed[2]) < timedelta(seconds=30):
+            print("Too many reacts counted too quickly (3-reaction/minute limit)")
+            return
+
+        # 5th most recent must be ≥10 min ago
+        if len(parsed) >= 5 and (now - parsed[4]) < timedelta(minutes=5):
+            print("Too many reacts counted too quickly (5-reaction/10 min limit)")
+            return
+
+        # 10th most recent must be ≥1 h ago
+        if len(parsed) >= 10 and (now - parsed[9]) < timedelta(minutes=30):
+            print("Too many reacts counted too quickly (10-reaction/hour limit)")
+            return
+
+        parsed.insert(0, now)
+        parsed = parsed[:10]
+        reactor_data["reactor_dates"] = [dt.isoformat() for dt in parsed]
+
+        reactor_data["count"] += 1
+        entry["total_reacts"] = total_count + 1
+
+    print("delta:", delta)
+    if delta == 0:
+        return
+
     multiplier = 1
     if reactor_id == TARGET_USER or reactor_id == ORIG_CHANNEL_ID:
-        entry_name = "additional_neri"
+        entry["additional_neri"] = entry["additional_neri"] + delta
         multiplier = 15
     elif author_id == TARGET_USER:
-        entry_name = "additional_self"
+        entry["additional_self"] = entry["additional_self"] + delta
+    else:
+        reactor_data = entry["reactor_counts"].setdefault(
+            reactor_id, {"count": 0, "value": 0}
+        )
+        reactor_data["value"] += delta
         
-    entry[entry_name] = entry[entry_name] + delta
     update_coins(author_id, multiplier * delta)
     MyBotState.save_social_rating()
 
     print(
         f"[Reactions] msg#{msg_id} for user {author_id} by user {reactor_id}: "
-        f"+{len(added)} added, -{len(removed)} removed → delta={delta}, "
-        f"new score={entry[entry_name]}"
+        f"+{len(added)} added, -{len(removed)} removed → delta={delta}"
     )
 
 def extract_emojis(lst):

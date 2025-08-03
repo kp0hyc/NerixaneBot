@@ -241,11 +241,12 @@ class BotState:
             for uid_str, v in raw.items():
                 uid = int(uid_str)
                 hist = cls.old_social_rating.setdefault(uid, {
-                    "additional_chat": 0,
-                    "additional_neri": 0,
-                    "additional_self": 0,
-                    "boosts":          0,
-                    "manual_rating":   0,
+                    "reactor_counts": {},
+                    "additional_chat":  0,
+                    "additional_neri":  0,
+                    "additional_self":  0,
+                    "boosts":           0,
+                    "manual_rating":    0,
                 })
 
                 hist["additional_chat"] += int(v.get("additional_chat", 0))
@@ -254,26 +255,60 @@ class BotState:
                 hist["boosts"]          += int(v.get("boosts", 0))
                 hist["manual_rating"]   += int(v.get("manual_rating", 0))
 
+                for rid_str, entry in v.get("reactor_counts", {}).items():
+                    rid = int(rid_str)
+                    if isinstance(entry, dict):
+                        count = int(entry.get("count", 0))
+                        value = int(entry.get("value", 0))
+                    else:
+                        count = int(entry)
+                        value = 0
+
+                    rc_hist = hist["reactor_counts"].setdefault(rid, {"count": 0, "value": 0})
+                    rc_hist["count"] += count
+                    rc_hist["value"] += value
+
     @classmethod
     def load_social_rating(cls):
         try:
             raw = json.loads(open(SOCIAL_RATING_FILE, encoding="utf-8").read())
-            print("Social rating: ", raw)
             cls.social_rating = {}
+
             for uid_str, v in raw.items():
                 uid = int(uid_str)
-                rc = {int(rid): int(cnt)
-                    for rid, cnt in v.get("reactor_counts", {}).items()}
-                total = int(v.get("total_reacts", sum(rc.values())))
+                rc_new = {}
+                for rid_str, item in v.get("reactor_counts", {}).items():
+                    rid = int(rid_str)
+
+                    if isinstance(item, dict):
+                        count = int(item.get("count", 0))
+                        value = int(item.get("value", 0))
+                        dates = item.get("reactor_dates", [])
+                    else:
+                        count = int(item)
+                        value = 0
+                        dates = []
+
+                    # ensure it’s a list of timestamps (strings or numbers)
+                    if not isinstance(dates, list):
+                        dates = list(dates)
+
+                    rc_new[rid] = {
+                        "count":       count,
+                        "value":       value,
+                        "reactor_dates": dates,
+                    }
+
                 cls.social_rating[uid] = {
-                    "reactor_counts": rc,
-                    "total_reacts":    total,
+                    "reactor_counts": rc_new,
+                    "banned":          bool(v.get("banned", False)),
                     "additional_chat": int(v.get("additional_chat", 0)),
                     "additional_neri": int(v.get("additional_neri", 0)),
                     "additional_self": int(v.get("additional_self", 0)),
                     "boosts":          int(v.get("boosts", 0)),
                     "manual_rating":   int(v.get("manual_rating", 0)),
                 }
+
         except (FileNotFoundError, json.JSONDecodeError):
             cls.social_rating = {}
 
@@ -281,14 +316,21 @@ class BotState:
     def save_social_rating(cls):
         dump = {
             str(uid): {
-                "reactor_counts": {str(rid): cnt
-                                for rid, cnt in info["reactor_counts"].items()},
-                "total_reacts":    info["total_reacts"],
-                "additional_chat": info["additional_chat"],
-                "additional_neri": info["additional_neri"],
+                "reactor_counts": {
+                    str(rid): {
+                        "count":         info_rc["count"],
+                        "value":         info_rc["value"],
+                        "reactor_dates": info_rc.get("reactor_dates", []),
+                    }
+                    for rid, info_rc in info["reactor_counts"].items()
+                },
+                "banned":           info["banned"],
+                "total_reacts":     info.get("total_reacts", 0),
+                "additional_chat":  info["additional_chat"],
+                "additional_neri":  info["additional_neri"],
                 "additional_self": info["additional_self"],
-                "boosts":          info["boosts"],
-                "manual_rating":   info["manual_rating"],
+                "boosts":           info["boosts"],
+                "manual_rating":    info["manual_rating"],
             }
             for uid, info in cls.social_rating.items()
         }

@@ -22,4 +22,5 @@ server.log
 social_rating*.json
 sub_rating.png
 __pycache__
+anon.session-journal
 
