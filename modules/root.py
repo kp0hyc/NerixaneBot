@@ -172,6 +172,25 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await check_afk_time(context.bot, user, update.effective_chat.id)
     
+    print(f"Before dice and via bot check")
+    if (msg.dice or msg.via_bot) and user.id != TARGET_USER:
+        print("Dice or via bot detected")
+        skip = False
+        if msg.dice and msg.dice.emoji == "🎰":
+            res = msg.dice.value - 1
+            v0 = (res >> 4) & 0b11
+            v1 = (res >> 2) & 0b11
+            v2 = res         & 0b11
+
+            if v0 == v1 == v2:
+                print("Dice triple detected, skip deletion")
+                skip = True
+
+        if not skip:
+            asyncio.create_task(
+                delete_messages_later([msg], 180)
+            )
+
     if user.id != TARGET_USER:
         return
     

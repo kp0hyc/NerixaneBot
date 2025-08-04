@@ -1,4 +1,3 @@
-import asyncio
 import sys
 
 from .top import *
@@ -535,7 +534,7 @@ async def slot_command(update: Update, context: CallbackContext):
                     f"Следующая попытка будет доступна {time_str}"
                 )
                 asyncio.create_task(
-                    delete_slot_messages_later([msg, warning], delay=5)
+                    delete_messages_later([msg, warning], delay=5)
                 )
                 return
         with db:
@@ -579,7 +578,7 @@ async def slot_command(update: Update, context: CallbackContext):
                 f"❌ Недостаточно рыженки: на счету {balance}, требуется {stake}."
             )
             asyncio.create_task(
-                delete_slot_messages_later([msg, warning], delay=5)
+                delete_messages_later([msg, warning], delay=5)
             )
             return
         update_coins(user.id, -stake)
@@ -587,7 +586,7 @@ async def slot_command(update: Update, context: CallbackContext):
     if not action_text and stake == 0:
         warning = await msg.reply_text("❌ Ставка не может быть нулевой.")
         asyncio.create_task(
-            delete_slot_messages_later([msg, warning], delay=5)
+            delete_messages_later([msg, warning], delay=5)
         )
         return
 
@@ -631,7 +630,7 @@ async def slot_command(update: Update, context: CallbackContext):
 
         if not mult:
             asyncio.create_task(
-                delete_slot_messages_later(
+                delete_messages_later(
                     [msg, slot_msg, result_msg],
                     delay=30
                 )
@@ -645,7 +644,7 @@ async def slot_command(update: Update, context: CallbackContext):
             )
         else:
             asyncio.create_task(
-                delete_slot_messages_later(
+                delete_messages_later(
                     [msg, slot_msg],
                     delay=30
                 )
@@ -670,14 +669,6 @@ async def resume_slot_command(update: Update, context: CallbackContext):
     
     MyBotState.slot = True
     res = await msg.reply_text("✅ Слот машина возобновлена.")
-
-async def delete_slot_messages_later(messages, delay: int):
-    await asyncio.sleep(delay)
-    for m in messages:
-        try:
-            await m.delete()
-        except:
-            pass
 
 async def add_helper(update: Update, context: CallbackContext):
     user = update.effective_user

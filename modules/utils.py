@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import random
 
@@ -238,3 +239,11 @@ def is_helper(user_id: int) -> bool:
         (user_id,)
     ).fetchone()
     return row is not None
+
+async def delete_messages_later(messages, delay: int):
+    await asyncio.sleep(delay)
+    for m in messages:
+        try:
+            await m.delete()
+        except:
+            pass
