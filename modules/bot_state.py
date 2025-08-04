@@ -157,6 +157,7 @@ class BotState:
         cls.load_emoji_weights()
         cls.load_meta_info()
         cls.compile_patterns()
+        cls.ensure_helpers_table()
 
     @classmethod
     def compile_patterns(cls):
@@ -503,3 +504,11 @@ class BotState:
 
         with open(META_FILE, "w", encoding="utf-8") as f:
             json.dump(serializable, f, ensure_ascii=False, indent=2)
+    
+    def ensure_helpers_table():
+        with db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS helper (
+                    id INTEGER PRIMARY KEY
+                )
+            """)

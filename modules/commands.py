@@ -314,7 +314,7 @@ async def start_bet(update: Update, context: CallbackContext):
     user = update.effective_user
     msg  = update.effective_message
 
-    if not user or user.id not in MyBotState.MODERATORS:
+    if not user or (user.id not in MyBotState.MODERATORS and not is_helper(user.id)):
         return
 
     text = msg.text or ""
@@ -374,8 +374,7 @@ async def close_bet(update: Update, context: CallbackContext):
     user = update.effective_user
     msg  = update.effective_message
 
-    # only moderators
-    if not user or user.id not in MyBotState.MODERATORS:
+    if not user or (user.id not in MyBotState.MODERATORS and not is_helper(user.id)):
         return
 
     args = context.args or []
@@ -401,7 +400,7 @@ async def finish_bet(update: Update, context: CallbackContext):
     user = update.effective_user
     msg  = update.effective_message
 
-    if not user or user.id not in MyBotState.MODERATORS:
+    if not user or (user.id not in MyBotState.MODERATORS and not is_helper(user.id)):
         return
 
     args = context.args or []
@@ -516,7 +515,7 @@ async def slot_command(update: Update, context: CallbackContext):
     if not user:
         return
 
-    if not MyBotState.slot:
+    if not MyBotState.slot and not (user.id in MyBotState.MODERATORS or is_helper(user.id)):
         warning = await msg.reply_text(
             "❌ Слот машина сейчас не работает. "
             "Попроси модераторов запустить её."
@@ -607,29 +606,21 @@ async def stop_slot_command(update: Update, context: CallbackContext):
     user = update.effective_user
     msg = update.effective_message
     
-    if not user or user.id not in MyBotState.MODERATORS:
+    if not user or (user.id not in MyBotState.MODERATORS and not is_helper(user.id)):
         return
     
     MyBotState.slot = False
     res = await msg.reply_text("✅ Слот машина остановлена.")
 
-    asyncio.create_task(
-        delete_slot_messages_later([msg, res], delay=5)
-    )
-
 async def resume_slot_command(update: Update, context: CallbackContext):
     user = update.effective_user
     msg = update.effective_message
     
-    if not user or user.id not in MyBotState.MODERATORS:
+    if not user or (user.id not in MyBotState.MODERATORS and not is_helper(user.id)):
         return
     
     MyBotState.slot = True
     res = await msg.reply_text("✅ Слот машина возобновлена.")
-
-    asyncio.create_task(
-        delete_slot_messages_later([msg, res], delay=5)
-    )
 
 async def delete_slot_messages_later(messages, delay: int):
     await asyncio.sleep(delay)
@@ -638,3 +629,56 @@ async def delete_slot_messages_later(messages, delay: int):
             await m.delete()
         except:
             pass
+
+async def add_helper(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MyBotState.MODERATORS:
+        return
+
+    args = context.args or []
+    if len(args) != 1 or not args[0].isdigit():
+        return await msg.reply_text("❌ Использование: /add_helper <user_id>")
+
+    helper_id = int(args[0])
+
+    with db:
+        db.execute(
+            "INSERT OR IGNORE INTO helper (id) VALUES (?)",
+            (helper_id,)
+        )
+    
+    helper_user = await context.bot.get_chat(helper_id)
+    mention = parse_mention(helper_user)
+
+    await msg.reply_text(f"✅ Пользователь {mention} стал помощником в Nerixane Cock Project.",
+                         parse_mode="HTML")
+
+async def remove_helper(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MyBotState.MODERATORS:
+        return
+
+    args = context.args or []
+    if len(args) != 1 or not args[0].isdigit():
+        return await msg.reply_text("❌ Использование: /remove_helper <user_id>")
+
+    helper_id = int(args[0])
+    with db:
+        cur = db.execute(
+            "DELETE FROM helper WHERE id = ?",
+            (helper_id,)
+        )
+    
+    helper_user = await context.bot.get_chat(helper_id)
+    mention = parse_mention(helper_user)
+
+    if cur.rowcount:
+        await msg.reply_text(f"✅ Пользователь {mention} больше не помощник в Nerixane Cock Project.",
+                             parse_mode="HTML")
+    else:
+        await msg.reply_text(f"ℹ️ Пользователь {mention} не был помощником.",
+                             parse_mode="HTML")

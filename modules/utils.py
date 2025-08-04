@@ -231,3 +231,10 @@ async def subscribe_flow_(
                 "✅ Я тебя записал, но не смогу отправить сообщение, пока ты не откроешь чат со мной. "
                 "Пожалуйста отправь /start мне в ЛС."
             )
+
+def is_helper(user_id: int) -> bool:
+    row = db.execute(
+        "SELECT 1 FROM helper WHERE id = ?",
+        (user_id,)
+    ).fetchone()
+    return row is not None
