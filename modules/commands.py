@@ -516,15 +516,47 @@ async def slot_command(update: Update, context: CallbackContext):
         return
 
     if not MyBotState.slot and not user.id in MyBotState.MODERATORS:
-        warning = await msg.reply_text(
-            "❌ Слот машина сейчас не работает. "
-            "Попроси модераторов или помощников запустить её."
-        )
-        asyncio.create_task(
-            delete_slot_messages_later([msg, warning], delay=5)
-        )
-        return
-
+        now_ts = int(datetime.now(TYUMEN).timestamp())
+        recent = db.execute(
+            "SELECT ts FROM slot_rolls WHERE user_id = ? ORDER BY ts DESC LIMIT 5",
+            (user.id,)
+        ).fetchall()
+        timestamps = [r["ts"] for r in recent]
+        if len(timestamps) == 5:
+            oldest = timestamps[-1]
+            if now_ts - oldest < 30 * 60:
+                next_avail_ts = oldest + 30 * 60
+                next_dt = datetime.fromtimestamp(
+                    next_avail_ts, tz=TYUMEN
+                )
+                time_str = next_dt.strftime("%Y-%m-%d %H:%M:%S")
+                warning = await msg.reply_text(
+                    f"❌ Лимит: 5 прокруток за 30 минут достигнут. "
+                    f"Следующая попытка будет доступна {time_str}"
+                )
+                asyncio.create_task(
+                    delete_slot_messages_later([msg, warning], delay=5)
+                )
+                return
+        with db:
+            db.execute(
+                "INSERT INTO slot_rolls (user_id, ts) VALUES (?, ?)",
+                (user.id, now_ts)
+            )
+            db.execute(
+                """
+                DELETE FROM slot_rolls
+                WHERE user_id = ?
+                AND ts NOT IN (
+                    SELECT ts
+                    FROM slot_rolls
+                    WHERE user_id = ?
+                    ORDER BY ts DESC
+                    LIMIT 5
+                )
+                """,
+                (user.id, user.id)
+            )
     args = context.args or []
     action_text = None
     stake = 0

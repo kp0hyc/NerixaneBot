@@ -158,6 +158,7 @@ class BotState:
         cls.load_meta_info()
         cls.compile_patterns()
         cls.ensure_helpers_table()
+        cls.ensure_slot_rolls_table()
 
     @classmethod
     def compile_patterns(cls):
@@ -505,4 +506,17 @@ class BotState:
                 CREATE TABLE IF NOT EXISTS helper (
                     id INTEGER PRIMARY KEY
                 )
+            """)
+    
+    def ensure_slot_rolls_table():
+        with db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS slot_rolls (
+                    user_id INTEGER NOT NULL,
+                    ts       INTEGER NOT NULL
+                )
+            """)
+            db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_slot_rolls_user
+                ON slot_rolls(user_id)
             """)
