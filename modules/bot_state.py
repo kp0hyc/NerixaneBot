@@ -285,20 +285,13 @@ class BotState:
                     if isinstance(item, dict):
                         count = int(item.get("count", 0))
                         value = int(item.get("value", 0))
-                        dates = item.get("reactor_dates", [])
                     else:
                         count = int(item)
                         value = 0
-                        dates = []
-
-                    # ensure it’s a list of timestamps (strings or numbers)
-                    if not isinstance(dates, list):
-                        dates = list(dates)
 
                     rc_new[rid] = {
                         "count":       count,
                         "value":       value,
-                        "reactor_dates": dates,
                     }
 
                 cls.social_rating[uid] = {
@@ -309,6 +302,7 @@ class BotState:
                     "additional_self": int(v.get("additional_self", 0)),
                     "boosts":          int(v.get("boosts", 0)),
                     "manual_rating":   int(v.get("manual_rating", 0)),
+                    "reactor_dates":   v.get("reactor_dates", []),
                 }
 
         except (FileNotFoundError, json.JSONDecodeError):
@@ -322,17 +316,17 @@ class BotState:
                     str(rid): {
                         "count":         info_rc["count"],
                         "value":         info_rc["value"],
-                        "reactor_dates": info_rc.get("reactor_dates", []),
                     }
                     for rid, info_rc in info["reactor_counts"].items()
                 },
-                "banned":           info["banned"],
+                "banned":           info.get("banned", False),
                 "total_reacts":     info.get("total_reacts", 0),
-                "additional_chat":  info["additional_chat"],
-                "additional_neri":  info["additional_neri"],
-                "additional_self": info["additional_self"],
-                "boosts":           info["boosts"],
-                "manual_rating":    info["manual_rating"],
+                "additional_chat":  info.get("additional_chat", 0),
+                "additional_neri":  info.get("additional_neri", 0),
+                "additional_self":  info.get("additional_self", 0),
+                "boosts":           info.get("boosts", 0),
+                "manual_rating":    info.get("manual_rating", 0),
+                "reactor_dates":    info.get("reactor_dates", []),
             }
             for uid, info in cls.social_rating.items()
         }

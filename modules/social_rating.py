@@ -102,16 +102,28 @@ async def on_message_reaction(mc, event):
         "additional_self": 0,
         "boosts":          0,
         "manual_rating":   0,
+        "reactor_dates":   [],
     })
 
     if reactor_id not in (TARGET_USER, ORIG_CHANNEL_ID) and author_id != TARGET_USER:
         rc = entry["reactor_counts"]
-        reactor_data = rc.setdefault(
+        reactor_spec_data = rc.setdefault(
             reactor_id,
             {"count": 0, "value": 0, "reactor_dates": []}
         )
 
-        prev_count  = reactor_data["count"]
+        reactor_data = MyBotState.social_rating.setdefault(reactor_id, {
+            "reactor_counts": {},
+            "total_reacts":    0,
+            "additional_chat": 0,
+            "additional_neri": 0,
+            "additional_self": 0,
+            "boosts":          0,
+            "manual_rating":   0,
+            "reactor_dates":   [],
+        })
+
+        prev_count  = reactor_spec_data["count"]
         total_count = sum(d["count"] for d in rc.values())
 
         if total_count >= 50:
@@ -152,7 +164,7 @@ async def on_message_reaction(mc, event):
         parsed = parsed[:10]
         reactor_data["reactor_dates"] = [dt.isoformat() for dt in parsed]
 
-        reactor_data["count"] += 1
+        reactor_spec_data["count"] += 1
         entry["total_reacts"] = total_count + 1
 
     print("delta:", delta)
