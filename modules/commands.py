@@ -515,10 +515,10 @@ async def slot_command(update: Update, context: CallbackContext):
     if not user:
         return
 
-    if not MyBotState.slot and not (user.id in MyBotState.MODERATORS or is_helper(user.id)):
+    if not MyBotState.slot and not user.id in MyBotState.MODERATORS:
         warning = await msg.reply_text(
             "❌ Слот машина сейчас не работает. "
-            "Попроси модераторов запустить её."
+            "Попроси модераторов или помощников запустить её."
         )
         asyncio.create_task(
             delete_slot_messages_later([msg, warning], delay=5)
@@ -526,45 +526,45 @@ async def slot_command(update: Update, context: CallbackContext):
         return
 
     args = context.args or []
+    action_text = None
+    stake = 0
     if args:
-        if not args[0].isdigit():
-            warning = await msg.reply_text("❌ Использование: /slot [число]")
+        if args[0].isdigit():
+            stake = int(args[0])
+        else:
+            action_text = " ".join(args)
+    else:
+        stake = 10
+
+    if not action_text and stake > 0:
+        row = db.execute(
+            "SELECT coins FROM user WHERE id = ?",
+            (user.id,)
+        ).fetchone()
+        balance = row["coins"] if row else 0
+        if balance < stake:
+            warning = await msg.reply_text(
+                f"❌ Недостаточно рыженки: на счету {balance}, требуется {stake}."
+            )
             asyncio.create_task(
                 delete_slot_messages_later([msg, warning], delay=5)
             )
             return
-        stake = int(args[0])
-    else:
-        stake = 10
+        update_coins(user.id, -stake)
 
-    row = db.execute(
-        "SELECT coins FROM user WHERE id = ?",
-        (user.id,)
-    ).fetchone()
-    balance = row["coins"] if row else 0
-    if balance < stake:
-        warning = await msg.reply_text(
-            f"❌ Недостаточно рыженки: на счету {balance}, требуется {stake}."
-        )
-        
+    if not action_text and stake == 0:
+        warning = await msg.reply_text("❌ Ставка не может быть нулевой.")
         asyncio.create_task(
-            delete_slot_messages_later(
-                [msg, warning],
-                delay=5
-            )
+            delete_slot_messages_later([msg, warning], delay=5)
         )
         return
 
-    update_coins(user.id, -stake)
-
     slot_msg = await msg.reply_dice(emoji="🎰")
     res = slot_msg.dice.value - 1
-
     v0 = (res >> 4) & 0b11
     v1 = (res >> 2) & 0b11
     v2 = res         & 0b11
 
-    print(f"Slot result: {v0}, {v1}, {v2}")
     word = "ничего"
     if v0 == v1 == v2:
         mult = {1:5, 2:10, 0:15, 3:30}[v0]
@@ -572,35 +572,52 @@ async def slot_command(update: Update, context: CallbackContext):
     else:
         mult = 0
 
-    new_balance = balance - stake + mult * stake
-
     name = parse_mention(user)
+    result_msg = None
+    if not action_text:
+        new_balance = balance - stake + mult * stake
 
-    if mult:
-        payout = stake * mult
-        update_coins(user.id, payout)
-        result_text = (
-            f"🎉 Ура! {name} налетел на «{word}» и помжножил свою ставку в "
-            f"{mult} раз — всего +{payout} рыженки!"
-            f" Баланс: {new_balance} рыженки"
-        )
-    else:
-        result_text = (
-            f"💔 Увы, {name} проиграл ставку в {stake} рыженки."
-            f" Баланс: {new_balance} рыженки"
-        )
-
-    result_msg = await msg.reply_text(
-        text=result_text,
-        parse_mode=constants.ParseMode.HTML
-    )
-    if not mult:
-        asyncio.create_task(
-            delete_slot_messages_later(
-                [msg, slot_msg, result_msg],
-                delay=30
+        # build and send result text (coins)
+        if mult:
+            payout = stake * mult
+            update_coins(user.id, payout)
+            result_text = (
+                f"🎉 Ура! {name} налетел на «{word}» и помножил свою ставку в "
+                f"{mult} раз — всего +{payout} рыженки! "
+                f"Баланс: {new_balance} рыженки"
             )
+        else:
+            result_text = (
+                f"💔 Увы, {name} проиграл ставку в {stake} рыженки."
+                f" Баланс: {new_balance} рыженки"
+            )
+
+        result_msg = await msg.reply_text(
+            text=result_text,
+            parse_mode=constants.ParseMode.HTML
         )
+
+        if not mult:
+            asyncio.create_task(
+                delete_slot_messages_later(
+                    [msg, slot_msg, result_msg],
+                    delay=30
+                )
+            )
+
+    if action_text:
+        if mult:
+            await msg.reply_text(
+                f"{name} налетел на «{word}» и теперь должен {action_text}",
+                parse_mode=constants.ParseMode.HTML
+            )
+        else:
+            asyncio.create_task(
+                delete_slot_messages_later(
+                    [msg, slot_msg],
+                    delay=30
+                )
+            )
 
 async def stop_slot_command(update: Update, context: CallbackContext):
     user = update.effective_user
