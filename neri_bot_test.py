@@ -35,6 +35,10 @@ def main():
     app.add_handler(
         MessageHandler(filters.Chat(chat_id=ORIG_CHANNEL_ID) & ~filters.COMMAND, handle_cocksize)
     )
+
+    app.add_handler(
+        MessageHandler(filters.Chat(chat_id=GAMBLING_CHANNEL_ID) & ~filters.COMMAND, handle_gambling)
+    )
     
     app.add_handler(CommandHandler("edit_weights", edit_weights_cmd))
     app.add_handler(

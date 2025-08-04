@@ -420,3 +420,17 @@ async def delete_forwards(bot, orig_chat, orig_msg):
             print(f"Unexpected error deleting message: {e}")
 
     MyBotState.forward_map.pop(key, None)
+
+async def handle_gambling(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("handle_gambling")
+    user = update.effective_user
+    msg = update.message
+    if not msg:
+        return
+    
+    if not user:
+        return
+    
+    #check if message via bot or a dice
+    if not msg.dice and not msg.via_bot:
+        msg.delete()

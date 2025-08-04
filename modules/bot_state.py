@@ -28,6 +28,7 @@ SPREADSHEET_ID    = os.environ["SPREADSHEET_ID"]
 GOOGLE_CREDS_PATH = os.environ["GOOGLE_CREDS_PATH"]
 
 ORIG_CHANNEL_ID   = int(os.environ["ORIG_CHANNEL_ID"])
+GAMBLING_CHANNEL_ID   = int(os.environ["GAMBLING_CHANNEL_ID"])
 TARGET_USER       = int(os.environ["TARGET_USER"])
 
 BASE_URL          = os.environ["BASE_URL"]
