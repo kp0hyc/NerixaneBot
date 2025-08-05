@@ -247,3 +247,9 @@ async def delete_messages_later(messages, delay: int):
             await m.delete()
         except:
             pass
+
+def check_group_owner(update):
+    user = update.effective_user
+    chat = update.effective_chat
+
+    return user and chat and user.id == TARGET_USER and chat.id == ORIG_CHANNEL_ID

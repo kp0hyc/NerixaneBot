@@ -186,8 +186,7 @@ async def unban_sc_user(update: Update, context: CallbackContext):
     await msg.reply_text(f"✅ Пользователь {name} разблокирован в соц. рейтинге.")
 
 async def change_social_rating(update: Update, context: CallbackContext):
-    caller = update.effective_user
-    if not caller or caller.id != TARGET_USER:
+    if not check_group_owner(update):
         return
 
     reply = update.message.reply_to_message
@@ -512,6 +511,10 @@ async def slot_command(update: Update, context: CallbackContext):
     user = update.effective_user
     msg  = update.effective_message
     if not user:
+        return
+
+    if user.id == TARGET_USER and update.effective_chat.id != ORIG_CHANNEL_ID:
+        await msg.delete()
         return
 
     #check chat id
