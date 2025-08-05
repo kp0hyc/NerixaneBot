@@ -164,7 +164,7 @@ async def on_message_reaction(mc, event):
             return
 
         parsed.insert(0, now)
-        parsed = parsed[:10]
+        parsed = parsed[:60]
         reactor_data["reactor_dates"] = [dt.isoformat() for dt in parsed]
 
         reactor_spec_data["count"] += 1
