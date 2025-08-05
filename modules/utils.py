@@ -240,6 +240,13 @@ def is_helper(user_id: int) -> bool:
     ).fetchone()
     return row is not None
 
+def is_white_bot(name: str) -> bool:
+    row = db.execute(
+        "SELECT 1 FROM white_bot WHERE name = ?",
+        (name.lower(),)
+    ).fetchone()
+    return row is not None
+
 async def delete_messages_later(messages, delay: int):
     await asyncio.sleep(delay)
     for m in messages:

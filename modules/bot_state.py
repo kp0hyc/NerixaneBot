@@ -160,6 +160,7 @@ class BotState:
         cls.compile_patterns()
         cls.ensure_helpers_table()
         cls.ensure_slot_rolls_table()
+        cls.ensure_white_bot_table()
 
     @classmethod
     def compile_patterns(cls):
@@ -520,4 +521,12 @@ class BotState:
             db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_slot_rolls_user
                 ON slot_rolls(user_id)
+            """)
+    
+    def ensure_white_bot_table():
+        with db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS white_bot (
+                    name TEXT PRIMARY KEY
+                )
             """)

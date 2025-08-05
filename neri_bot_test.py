@@ -71,6 +71,8 @@ def main():
     app.add_handler(CommandHandler("resume_slot", resume_slot_command))
     app.add_handler(CommandHandler("add_helper", add_helper))
     app.add_handler(CommandHandler("remove_helper", remove_helper))
+    app.add_handler(CommandHandler("ignore_bot", ignore_bot))
+    app.add_handler(CommandHandler("stop_ignore_bot", stop_ignore_bot))
     
     app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|social_global|cock|casino):\d+$"))
     app.add_handler(CallbackQueryHandler(follow_callback, pattern=r"^follow$"))

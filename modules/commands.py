@@ -730,3 +730,45 @@ async def remove_helper(update: Update, context: CallbackContext):
     else:
         await msg.reply_text(f"ℹ️ Пользователь {mention} не был помощником.",
                              parse_mode="HTML")
+
+async def ignore_bot(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MyBotState.MODERATORS:
+        return
+    
+    args = context.args or []
+    if len(args) != 1:
+        return await msg.reply_text("❌ Использование: /ignore_bot <bot_name>")
+
+    bot_name = args[0]
+
+    with db:
+        db.execute(
+            "INSERT OR IGNORE INTO white_bot (name) VALUES (?)",
+            (bot_name.lower(),)
+        )
+
+    await msg.reply_text(f"✅ Бот {bot_name} теперь в белом списке.")
+
+async def stop_ignore_bot(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MyBotState.MODERATORS:
+        return
+
+    args = context.args or []
+    if len(args) != 1:
+        return await msg.reply_text("❌ Использование: /stop_ignore_bot <bot_name>")
+
+    bot_name = args[0]
+
+    with db:
+        db.execute(
+            "DELETE FROM white_bot WHERE name = ?",
+            (bot_name.lower(),)
+        )
+
+    await msg.reply_text(f"✅ Бот {bot_name} больше не в белом списке.")

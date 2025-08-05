@@ -186,6 +186,11 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 print("Dice triple detected, skip deletion")
                 skip = True
 
+        if msg.via_bot:
+            skip = is_white_bot(msg.via_bot.username)
+
+        print(f"Skip deletion: {skip}")
+
         if not skip:
             asyncio.create_task(
                 delete_messages_later([msg], 180)
