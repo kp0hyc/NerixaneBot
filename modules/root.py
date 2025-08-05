@@ -438,4 +438,4 @@ async def handle_gambling(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     #check if message via bot or a dice
     if not msg.dice and not msg.via_bot:
-        msg.delete()
+        await msg.delete()
