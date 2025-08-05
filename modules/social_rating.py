@@ -92,6 +92,9 @@ async def on_message_reaction(mc, event):
         
     if delta == 0:
         print("delta is zero, we quit")
+        if reactor_id in (TARGET_USER, ORIG_CHANNEL_ID):
+            print("================ALARM WE MISSED NERIXANE REACTION!!!===============")
+
         return
 
     entry = MyBotState.social_rating.setdefault(author_id, {
