@@ -169,12 +169,12 @@ async def on_message_reaction(mc, event):
             return
 
         # 5th most recent must be ≥10 min ago
-        if len(parsed) >= 20 and (now - parsed[4]) < timedelta(minutes=5):
+        if len(parsed) >= 10 and (now - parsed[4]) < timedelta(minutes=5):
             print("Too many reacts counted too quickly (5-reaction/10 min limit)")
             return
 
         # 10th most recent must be ≥1 h ago
-        if len(parsed) >= 60 and (now - parsed[9]) < timedelta(minutes=30):
+        if len(parsed) >= 30 and (now - parsed[9]) < timedelta(minutes=30):
             print("Too many reacts counted too quickly (10-reaction/hour limit)")
             return
 
