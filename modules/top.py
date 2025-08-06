@@ -4,7 +4,6 @@ from .config import MyBotState
 from .utils import *
 
 from telegram import (
-    constants,
     Update,
 )
 from telegram.ext import (

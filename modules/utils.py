@@ -11,6 +11,7 @@ from typing import Callable, Awaitable
 from html import escape
 
 from telegram import (
+    constants,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
@@ -282,3 +283,7 @@ def clear_old_messages():
             "DELETE FROM white_msg WHERE ts < ?",
             (cutoff,)
         )
+
+async def delayed_reply(msg, text, delay):
+    await asyncio.sleep(delay)
+    await msg.reply_text(text=text, parse_mode=constants.ParseMode.HTML)

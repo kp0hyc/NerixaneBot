@@ -631,9 +631,8 @@ async def slot_command(update: Update, context: CallbackContext):
                 f" Баланс: {new_balance} рыженки"
             )
 
-        result_msg = await msg.reply_text(
-            text=result_text,
-            parse_mode=constants.ParseMode.HTML
+        asyncio.create_task(
+            delayed_reply(msg, result_text, 2)
         )
 
         #if not mult:
@@ -646,9 +645,8 @@ async def slot_command(update: Update, context: CallbackContext):
 
     if action_text:
         if mult:
-            await msg.reply_text(
-                f"{name} налетел на «{word}» и теперь должен {action_text}",
-                parse_mode=constants.ParseMode.HTML
+            asyncio.create_task(
+                delayed_reply(msg, f"{name} налетел на «{word}» и теперь должен {action_text}", 2)
             )
         #else:
             #asyncio.create_task(
