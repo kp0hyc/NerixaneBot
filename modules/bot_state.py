@@ -161,6 +161,7 @@ class BotState:
         cls.ensure_helpers_table()
         cls.ensure_slot_rolls_table()
         cls.ensure_white_bot_table()
+        cls.ensure_white_msg_table()
 
     @classmethod
     def compile_patterns(cls):
@@ -529,4 +530,17 @@ class BotState:
                 CREATE TABLE IF NOT EXISTS white_bot (
                     name TEXT PRIMARY KEY
                 )
+            """)
+    
+    def ensure_white_msg_table():
+        with db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS white_msg (
+                    msg_id INTEGER NOT NULL,
+                    ts     INTEGER NOT NULL
+                )
+            """)
+            db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_white_msg_id
+                ON white_msg(msg_id)
             """)

@@ -255,8 +255,30 @@ async def delete_messages_later(messages, delay: int):
         except:
             pass
 
+async def delete_message_later_and_check(msg, delay: int):
+    await asyncio.sleep(delay)
+    row = db.execute(
+        "SELECT 1 FROM white_msg WHERE msg_id = ?",
+        (msg.id,)
+    ).fetchone()
+
+    if row is not None:
+        print(f"Message {msg.id} is in white list, we ignore deletion")
+    else:
+        await msg.delete()
+
 def check_group_owner(update):
     user = update.effective_user
     chat = update.effective_chat
 
     return user and chat and user.id == TARGET_USER and chat.id == ORIG_CHANNEL_ID
+
+def clear_old_messages():
+    now = datetime.now(TYUMEN)
+    cutoff = now - timedelta(hours=1)
+
+    with db:
+        db.execute(
+            "DELETE FROM white_msg WHERE ts < ?",
+            (cutoff,)
+        )

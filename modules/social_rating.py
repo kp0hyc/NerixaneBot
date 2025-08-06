@@ -39,6 +39,34 @@ async def on_message_reaction(mc, event):
     
     print("orig_msg: ", msg)
 
+    old = getattr(event, 'old_reactions', []) or []
+    new = getattr(event, 'new_reactions', []) or getattr(event, 'new_reaction', [])
+
+    old_set = set(extract_emojis(old))
+    new_set = set(extract_emojis(new))
+    
+    added   = new_set - old_set
+    removed = old_set - new_set
+
+    print(f"added reactions: {added}")
+    print(f"removed reactions: {removed}")
+
+    now = datetime.now(TYUMEN)
+    msg_ts = msg.date.timestamp() 
+    print("debug now ts: ", now.timestamp())
+    print("debug msg ts: ", msg_ts)
+    if now.timestamp() - msg_ts > 600:
+        print("message is too old, we ignore")
+    else:
+        #check if it via howyour bot and add to database if it's more then 3 reactions
+        if len(old_set) == 0 and len(new_set) >= 1 and msg.via_bot_id is not None:
+            print("enough reactions via bot")
+            db.execute(
+                "INSERT OR IGNORE INTO white_msg (msg_id, ts) VALUES (?, ?)",
+                (msg_id, now)
+            )
+            db.commit()
+
     author_id = None
     if hasattr(msg, "from_id"):
         if msg.from_id != None:
@@ -67,22 +95,9 @@ async def on_message_reaction(mc, event):
         if not join_date:
             print("user not in the chat to count rating")
             return
-        now = datetime.now(timezone.utc)
         if (now - join_date).days <= 3:
             print("member is too new")
             return
-
-    old = getattr(event, 'old_reactions', []) or []
-    new = getattr(event, 'new_reactions', []) or getattr(event, 'new_reaction', [])
-
-    old_set = set(extract_emojis(old))
-    new_set = set(extract_emojis(new))
-    
-    added   = new_set - old_set
-    removed = old_set - new_set
-
-    print(f"added reactions: {added}")
-    print(f"removed reactions: {removed}")
 
     delta = 0
     for e in added:

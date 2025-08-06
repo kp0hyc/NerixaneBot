@@ -9,6 +9,7 @@ async def persist_stats(context: ContextTypes.DEFAULT_TYPE):
     MyBotState.save_stats()
     MyBotState.save_daily_stats()
     clear_and_save_cocks()
+    clear_old_messages()
     print("Message stats saved.")
 
 def check_init_user_table():

@@ -171,6 +171,18 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
         MyBotState.save_social_rating()
     
     await check_afk_time(context.bot, user, update.effective_chat.id)
+
+    #check if message is a reply
+    if msg.reply_to_message:
+        reply = msg.reply_to_message
+        #check if reply is via bot
+        if reply.via_bot:
+            print("Whitelist msg that was replied")
+            with db:
+                db.execute(
+                    "INSERT OR IGNORE INTO white_msg (msg_id, ts) VALUES (?, ?)",
+                    (reply.id, datetime.now(TYUMEN))
+                )
     
     print(f"Before dice and via bot check")
     if (msg.dice or msg.via_bot) and user.id != TARGET_USER:
@@ -193,7 +205,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not skip:
             asyncio.create_task(
-                delete_messages_later([msg], 180)
+                delete_message_later_and_check(msg, 300)
             )
 
     if user.id != TARGET_USER:
