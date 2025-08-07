@@ -148,6 +148,7 @@ class BotState:
         cls.old_social_rating = {}
         cls.emoji_weights = {}
         cls.slot = True
+        cls.indexed_users = {}
         
         cls.load_forward_map()
         cls.load_banlist()
@@ -162,6 +163,8 @@ class BotState:
         cls.ensure_slot_rolls_table()
         cls.ensure_white_bot_table()
         cls.ensure_white_msg_table()
+
+        cls.upgrade_users_table()
 
     @classmethod
     def compile_patterns(cls):
@@ -503,6 +506,20 @@ class BotState:
         with open(META_FILE, "w", encoding="utf-8") as f:
             json.dump(serializable, f, ensure_ascii=False, indent=2)
     
+    def upgrade_users_table():
+        cur = db.cursor()
+
+        cur.execute("PRAGMA table_info('user');")
+        existing = {row[1] for row in cur.fetchall()}
+
+        if "alias" not in existing:
+            cur.execute("ALTER TABLE user ADD COLUMN alias TEXT;")
+
+        if "note" not in existing:
+            cur.execute("ALTER TABLE user ADD COLUMN note TEXT;")
+
+        db.commit()
+
     def ensure_helpers_table():
         with db:
             db.execute("""

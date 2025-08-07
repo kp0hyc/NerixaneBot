@@ -1,6 +1,7 @@
 from modules.commands import *
 from modules.root import *
 from modules.social_rating import *
+from modules.inline import *
 from modules.config import MyBotState
 
 from datetime import time
@@ -14,6 +15,7 @@ from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
+    InlineQueryHandler,
     MessageHandler,
     filters,
 )
@@ -73,6 +75,10 @@ def main():
     app.add_handler(CommandHandler("remove_helper", remove_helper))
     app.add_handler(CommandHandler("ignore_bot", ignore_bot))
     app.add_handler(CommandHandler("stop_ignore_bot", stop_ignore_bot))
+    app.add_handler(CommandHandler("set_alias", set_alias))
+    app.add_handler(CommandHandler("set_note", set_note))
+
+    app.add_handler(InlineQueryHandler(inline_query))
     
     app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|social_global|cock|casino):\d+$"))
     app.add_handler(CallbackQueryHandler(follow_callback, pattern=r"^follow$"))
@@ -108,6 +114,12 @@ def main():
         refresh_polls,
         interval=300,
         first=240
+    )
+
+    app.job_queue.run_repeating(
+        index_users,
+        interval=600,
+        first=1
     )
     
     app.job_queue.run_daily(

@@ -770,3 +770,63 @@ async def stop_ignore_bot(update: Update, context: CallbackContext):
         )
 
     await msg.reply_text(f"✅ Бот {bot_name} больше не в белом списке.")
+
+async def set_alias(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MyBotState.MODERATORS:
+        return
+
+    args = context.args or []
+    if len(args) < 2:
+        return await msg.reply_text("Использование: /set_alias <user_id> <alias>")
+
+    try:
+        target_id = int(args[0])
+    except ValueError:
+        return await msg.reply_text("❌ Вторым аргументом должно быть число, например /set_alias 123456789 alias")
+
+    alias = " ".join(args[1:]).strip()
+
+    with db:
+        db.execute(
+            "UPDATE user SET alias = ? WHERE id = ?",
+            (alias, target_id)
+        )
+    
+    name = parse_mention(await context.bot.get_chat(target_id))
+
+    await msg.reply_text(f"✅ Установлен псевдоним для {name}: {alias}", parse_mode="HTML")
+
+    MyBotState.indexed_users[target_id]["alias"] = alias
+
+async def set_note(update: Update, context: CallbackContext):
+    user = update.effective_user
+    msg  = update.effective_message
+
+    if not user or user.id not in MyBotState.MODERATORS:
+        return
+    
+    args = context.args or []
+    if len(args) < 2:
+        return await msg.reply_text("Использование: /set_note <user_id> <note>")
+
+    try:
+        target_id = int(args[0])
+    except ValueError:
+        return await msg.reply_text("❌ Вторым аргументом должно быть число, например /set_note 123456789 note")
+
+    note = " ".join(args[1:]).strip()
+
+    with db:
+        db.execute(
+            "UPDATE user SET note = ? WHERE id = ?",
+            (note, target_id)
+        )
+    
+    name = parse_mention(await context.bot.get_chat(target_id))
+
+    await msg.reply_text(f"✅ Установлена заметка для {name}: {note}", parse_mode="HTML")
+
+    MyBotState.indexed_users[target_id]["note"] = note
