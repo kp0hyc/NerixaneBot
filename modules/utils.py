@@ -48,8 +48,19 @@ def parse_name(uc):
         return escape(f"@{uc.username}")
     return escape(str(uc.id))
 
+def parse_alias_name(uc):
+    indexed_user = MyBotState.indexed_users.get(uc.id)
+    if indexed_user is not None:
+        return indexed_user["alias"]
+    else:
+        return parse_name(uc)
+
 def parse_mention(user):
     full_name = parse_name(user)
+    return f'<a href="tg://user?id={user.id}">{full_name}</a>'
+
+def parse_mention_with_alias(user):
+    full_name = parse_alias_name(user)
     return f'<a href="tg://user?id={user.id}">{full_name}</a>'
 
 def count_total_rating(sr, uid):

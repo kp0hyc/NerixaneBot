@@ -611,7 +611,7 @@ async def slot_command(update: Update, context: CallbackContext):
     else:
         mult = 0
 
-    name = parse_mention(user)
+    name = parse_mention_with_alias(user)
     result_msg = None
     if not action_text:
         new_balance = balance - stake + mult * stake

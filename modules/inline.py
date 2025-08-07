@@ -1,4 +1,4 @@
-import uuid
+import html
 
 from .config import MyBotState
 from .utils import *
@@ -54,7 +54,6 @@ RANKS: list[dict] = [
         "aliases": [
             "гигасимп",
             "брат рыжепальди",
-            "рыжепопик",
             "КВАС0ЁБ",
             "Анальный Верзила",
         ],
@@ -91,16 +90,21 @@ async def inline_query(update: Update, context: CallbackContext) -> None:
         note  = info.get("note",  "")
         rank_title, _ = pick_rank_alias(info["soc_cur_tot"])
 
+        alias_esc       = html.escape(alias)
+        note_esc        = html.escape(note)
+        name_esc        = html.escape(info["name"])
+        rank_title_esc  = html.escape(rank_title)
+
         dossier = (
-            f"🗂 **Досье на агента {alias}**\n"
-            f"👤 {info['name']}  |  _{rank_title}_\n"
-            f"📨 **Сообщений:** {info['total_msgs']}  "
+            f"🗂 <b>Досье на {alias_esc}</b>\n"
+            f"👤 {name_esc}  |  <i>{rank_title_esc}</i>\n"
+            f"📨 <b>Сообщений:</b> {info['total_msgs']}  "
               f"(сегодня — {info['daily_msgs']})\n"
-            f"❤️ **Текущий соц. рейтинг:** {info['soc_cur_tot']} "
+            f"❤️ <b>Текущий соц. рейтинг:</b> {info['soc_cur_tot']} "
               f"(из них нализал — {info['soc_cur_neri']})\n"
-            f"🌍 **Весь рейтинг:** {info['soc_glob_tot']}\n"
-            f"🪙 **Рыженки запрятал:** {info['coins']}\n\n"
-            f"{note}"
+            f"🌍 <b>Весь рейтинг:</b> {info['soc_glob_tot']}\n"
+            f"🪙 <b>Рыженки запрятал:</b> {info['coins']}\n\n"
+            f"{note_esc}"
         )
 
         results.append(
@@ -110,11 +114,13 @@ async def inline_query(update: Update, context: CallbackContext) -> None:
                 description=f"{rank_title} • 💬 {info['total_msgs']} • 🪙 {info['coins']}",
                 input_message_content=InputTextMessageContent(
                     message_text=dossier,
-                    parse_mode="Markdown",
+                    parse_mode="HTML",
                     disable_web_page_preview=True,
                 ),
             )
         )
+    
+    results = results[:50]
 
     await update.inline_query.answer(
         results,
