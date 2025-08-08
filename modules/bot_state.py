@@ -149,6 +149,7 @@ class BotState:
         cls.emoji_weights = {}
         cls.slot = True
         cls.indexed_users = {}
+        cls.rd_users = set()
         
         cls.load_forward_map()
         cls.load_banlist()
@@ -163,6 +164,7 @@ class BotState:
         cls.ensure_slot_rolls_table()
         cls.ensure_white_bot_table()
         cls.ensure_white_msg_table()
+        cls.ensure_random_deposit_table()
 
         cls.upgrade_users_table()
 
@@ -560,4 +562,12 @@ class BotState:
             db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_white_msg_id
                 ON white_msg(msg_id)
+            """)
+    
+    def ensure_random_deposit_table():
+        with db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS random_deposit (
+                    ts       INTEGER NOT NULL
+                )
             """)

@@ -82,6 +82,7 @@ def main():
     
     app.add_handler(CallbackQueryHandler(stats_page_callback, pattern=r"^stats:(?:global|daily|social|social_global|cock|casino):\d+$"))
     app.add_handler(CallbackQueryHandler(follow_callback, pattern=r"^follow$"))
+    app.add_handler(CallbackQueryHandler(on_rd_join, pattern=r"^rd_join$"))
 
     @mc.on(events.MessageDeleted(chats=ORIG_CHANNEL_ID))
     async def on_deleted(event):
@@ -131,6 +132,8 @@ def main():
         reset_monthly_social_rating,
         time=time(hour=0, minute=1, tzinfo=TYUMEN)
     )
+
+    app.job_queue.run_once(random_deposit, when=1)
 
     app.run_polling(
         timeout=30,
