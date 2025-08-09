@@ -1,4 +1,5 @@
 import html
+import math
 
 from .config import MyBotState
 from .utils import *
@@ -9,74 +10,105 @@ from telegram.ext import (
     CallbackContext,
 )
 
-RANKS: list[dict] = [
-    {
-        "title": "Опущенный",
-        "min": float("-inf"),  # всё, что ниже 0
-        "max": -1,
-        "aliases": [
+RANK_TRACKS = {
+    "neri": {
+        "field": "soc_cur_neri",
+        "buckets": [
+            {"title": "Опущенный",      "min": float("-inf"), "max": -1,   "weight": 9999},
+            {"title": "Латентный симп", "min": 0,   "max": 99,  "weight": 20},
+            {"title": "Симп",           "min": 100, "max": 299, "weight": 40},
+            {"title": "Гига-симп",      "min": 300, "max": 999, "weight": 70},
+            {"title": "Архисимп",    "min": 1000,"max": float("inf"), "weight": 9999},
+        ],
+    },
+
+    "social": {
+        "field": "soc_cur_tot",
+        "buckets": [
+            {"title": "Изгой",        "min": float("-inf"), "max": -1,   "weight": 5000},
+            {"title": "Наблюдатель",  "min": 0,   "max": 99,  "weight": 25},
+            {"title": "Свой парень",  "min": 100, "max": 499, "weight": 45},
+            {"title": "Авторитет",    "min": 500, "max": 999, "weight": 1000},
+            {"title": "Икона чата",   "min": 1000,"max": float("inf"), "weight": 5000},
+        ],
+    },
+
+    "msgs": {
+        "field": "total_msgs",
+        "buckets": [
+            {"title": "Скорлупа",      "min": 0,   "max": 49,   "weight": 400},
+            {"title": "Болтун",          "min": 50,  "max": 199,  "weight": 30},
+            {"title": "Труженик чата",   "min": 200, "max": 499,  "weight": 50},
+            {"title": "Почётный спамер", "min": 500, "max": 4999,  "weight": 75},
+            {"title": "Гигасрун",         "min": 5000,"max": float("inf"), "weight": 400},
+        ],
+    },
+
+    "coins": {
+        "field": "coins",
+        "buckets": [
+            {"title": "Бомжара должник",       "min": float("-inf"),   "max": 0,    "weight": 8000},
+            {"title": "Дрочер копеек",    "min": 1,   "max": 99,    "weight": 4000},
+            {"title": "Копатель сокровищ",    "min": 100,  "max": 999,   "weight": 48},
+            {"title": "Коллекционер рыженки", "min": 1000,  "max": 9999,  "weight": 72},
+            {"title": "Вор казино",             "min": 10000, "max": float("inf"), "weight": 8000},
+        ],
+    },
+}
+
+ALIASES = [
             "чмо",
             "клоун",
             "Какамал",
             "мочехлёб",
             "ЧЕРЕПАХА-ТЕРПИЛА",
-        ],
-    },
-    {
-        "title": "Латентный симп",
-        "min": 0,
-        "max": 99,
-        "aliases": [
             "Данжен-Мастер",
             "МЧС",
             "Малютка",
             "СН0РЛАКС",
             "ЗВЕН0",
             "ЗЕРН0",
-        ],
-    },
-    {
-        "title": "Симп",
-        "min": 100,
-        "max": 299,
-        "aliases": [
             "СИМП",
             "симпотяга",
             "половой психопат",
             "Программист-анальник",
             "Секстерминатор",
-        ],
-    },
-    {
-        "title": "Гига-симп",
-        "min": 300,
-        "max": 999,
-        "aliases": [
             "гигасимп",
             "брат рыжепальди",
             "КВАС0ЁБ",
             "Анальный Верзила",
-        ],
-    },
-    {
-        "title": "Легенда чата",
-        "min": 1000,
-        "max": float("inf"),
-        "aliases": [
             "брат Фиттипальди (живой)",
             "брат Фиттипальди (тот, что умер)",
             "Ефим Шефрим",
             "Анатолий Курпатов",
             "В0Д0ЛАЗ-ПУК0ВДЫХ",
-        ],
-    },
 ]
 
-def pick_rank_alias(score: int) -> tuple[str, str]:
-    for bucket in RANKS:
-        if bucket["min"] <= score <= bucket["max"]:
-            return bucket["title"], random.choice(bucket["aliases"])
-    return "??", "Безымянный"
+def _pick_bucket(value: int | float, buckets: list[dict]) -> tuple[int, dict]:
+    for i, b in enumerate(buckets):
+        if b["min"] <= value <= b["max"]:
+            return i, b
+    return 0, buckets[0]
+
+def pick_rank(info: dict) -> str:
+    best_title = "??"
+    best_weight = float("-inf")
+
+    for _, track in RANK_TRACKS.items():
+        value = info.get(track["field"], 0)
+        _, bucket = _pick_bucket(value, track["buckets"])
+        w = float(bucket.get("weight", 0.0))
+        if math.isnan(w):
+            w = float("-inf")
+
+        if (w > best_weight):
+            best_weight = w
+            best_title = bucket["title"]
+
+    return best_title
+
+def pick_alias() -> str:
+    return random.choice(ALIASES)
 
 async def inline_query(update: Update, context: CallbackContext) -> None:
     q = update.inline_query.query.strip().lower()
@@ -88,7 +120,7 @@ async def inline_query(update: Update, context: CallbackContext) -> None:
 
         alias = info.get("alias", "") or "???"
         note  = info.get("note",  "")
-        rank_title, _ = pick_rank_alias(info["soc_cur_tot"])
+        rank_title = pick_rank(info)
 
         alias_esc       = html.escape(alias)
         note_esc        = html.escape(note)
@@ -165,7 +197,7 @@ async def index_users(ctx: CallbackContext) -> None:
             note  = note_by_id.get(uid)  or ""
 
             if not alias:
-                _, alias = pick_rank_alias(cur_tot)
+                alias = pick_alias(cur_tot)
                 note = f""
 
                 with db:

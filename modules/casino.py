@@ -138,7 +138,7 @@ def get_random_deposit_ts() -> int | None:
     return int(row[0]) if row else None
 
 def schedule_next_random_deposit(ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    next_dt = datetime.now(TYUMEN) + timedelta(minutes=random.randint(60, 12*60))
+    next_dt = datetime.now(TYUMEN) + timedelta(minutes=random.randint(6*60, 36*60))
 
     with db:
         db.execute("DELETE FROM random_deposit")
@@ -152,7 +152,7 @@ def schedule_next_random_deposit(ctx: ContextTypes.DEFAULT_TYPE) -> None:
     print(f"Random deposit scheduled for {next_dt.isoformat()}")
 
 async def random_deposit_job(ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    text = "💸 Время додепа! Раздаётся 5.000 рыженки между всеми, кто поучаствует."
+    text = "💸 Время додепа! Раздаётся 10.000 рыженки между всеми, кто поучаствует."
     keyboard = InlineKeyboardMarkup(
         [[InlineKeyboardButton("🎁 Додеп!", callback_data="rd_join")]]
     )
@@ -230,7 +230,7 @@ async def on_rd_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     state["participants"].append((user.id, display_name))
 
     try:
-        base = "💸 Время додепа! Раздаётся 5.000 рыженки между всеми, кто поучаствует.\n\n"
+        base = "💸 Время додепа! Раздаётся 10.000 рыженки между всеми, кто поучаствует.\n\n"
         participants_text = "\n".join(f"{i+1}. {name}" for i, (_, name) in enumerate(state["participants"]))
         new_text = f"{base}Участники:\n{participants_text}\n\nНажми кнопку ниже, чтобы присоединиться!"
         await msg.edit_text(new_text, reply_markup=msg.reply_markup, parse_mode="HTML")
@@ -261,7 +261,7 @@ async def finalize_giveaway(ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     n = len(participants)
-    shares = _random_integer_partition_allow_zero(5000, n)
+    shares = _random_integer_partition_allow_zero(10000, n)
     shares.sort(reverse=True)
 
     results = list(zip(participants, shares))
