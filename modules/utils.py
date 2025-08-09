@@ -17,9 +17,20 @@ from telegram import (
 )
 from telegram.error import Forbidden
 
-async def get_join_date(client: TelegramClient, chat_id: int, user_id: int):
+def to_dt(value):
+    """Приводит значение к aware datetime в UTC или None."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, TYUMEN)
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=TYUMEN)
+    # если тип неожиданный — лучше вернуть None или кинуть
+    return None
+
+async def get_join_date(chat_id: int, user_id: int):
     try:
-        res = await client(GetParticipantRequest(
+        res = await MyBotState.mc(GetParticipantRequest(
             channel=chat_id,
             participant=user_id
         ))

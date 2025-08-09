@@ -451,3 +451,28 @@ async def handle_gambling(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #check if message via bot or a dice
     if not msg.dice and not msg.via_bot:
         await msg.delete()
+
+
+async def on_chat_member(update, context):
+    print(f"Chat member update: {update.chat_member}")
+
+    if update.chat_member.chat.id != ORIG_CHANNEL_ID:
+        return
+
+    old = update.chat_member.old_chat_member
+    new = update.chat_member.new_chat_member
+
+    left = old.status in ("member","administrator","creator") and new.status in ("left","kicked")
+    joined = old.status in ("left","kicked") and new.status in ("member","administrator","creator")
+
+    if joined:
+        print(f"User {new.user.id} joined the chat")
+    elif left:
+        print(f"User {new.user.id} left the chat")
+
+        with db:
+            db.execute("""
+                UPDATE user
+                SET left_cnt = COALESCE(left_cnt, 0) + 1
+                WHERE id = ?
+            """, (new.user.id,))

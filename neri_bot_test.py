@@ -15,6 +15,7 @@ from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
+    ChatMemberHandler,
     InlineQueryHandler,
     MessageHandler,
     filters,
@@ -24,6 +25,8 @@ def main():
     check_init_user_table()
 
     mc = TelegramClient('anon', API_ID, API_HASH)
+
+    MyBotState.mc = mc
     
     mc.start(bot_token=BOT_TOKEN)
 
@@ -41,6 +44,8 @@ def main():
     app.add_handler(
         MessageHandler(filters.Chat(chat_id=GAMBLING_CHANNEL_ID) & ~filters.COMMAND, handle_gambling)
     )
+
+    app.add_handler(ChatMemberHandler(on_chat_member, ChatMemberHandler.ANY_CHAT_MEMBER))
     
     app.add_handler(CommandHandler("edit_weights", edit_weights_cmd))
     app.add_handler(
@@ -136,6 +141,7 @@ def main():
     app.job_queue.run_once(random_deposit, when=1)
 
     app.run_polling(
+        allowed_updates=Update.ALL_TYPES,
         timeout=30,
     )
     print("exiting")

@@ -150,6 +150,7 @@ class BotState:
         cls.slot = True
         cls.indexed_users = {}
         cls.rd_users = set()
+        cls.mc = None
         
         cls.load_forward_map()
         cls.load_banlist()
@@ -519,6 +520,12 @@ class BotState:
 
         if "note" not in existing:
             cur.execute("ALTER TABLE user ADD COLUMN note TEXT;")
+
+        if "left_cnt" not in existing:
+            cur.execute("ALTER TABLE user ADD COLUMN left_cnt INTEGER DEFAULT 0;")
+
+        if "chat_joined" not in existing:
+            cur.execute("ALTER TABLE user ADD COLUMN chat_joined INTEGER;")
 
         db.commit()
 

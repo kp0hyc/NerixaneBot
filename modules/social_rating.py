@@ -91,7 +91,7 @@ async def on_message_reaction(mc, event):
         return
 
     if reactor_id != ORIG_CHANNEL_ID and reactor_id != TARGET_USER:
-        join_date = await get_join_date(mc, ORIG_CHANNEL_ID, reactor_id)
+        join_date = await get_join_date(ORIG_CHANNEL_ID, reactor_id)
         if not join_date:
             print("user not in the chat to count rating")
             return
