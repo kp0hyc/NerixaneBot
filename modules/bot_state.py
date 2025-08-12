@@ -124,6 +124,9 @@ HOMOGLYPHS = {
 def daily_path_for_(date_obj: datetime.date) -> Path:
     return DAILY_STATS_DIR / f"daily_stats_{date_obj.isoformat()}.json"
 
+def normalize(text):
+    return text.translate(HOMOGLYPHS).lower()
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -175,7 +178,7 @@ class BotState:
                 r'(?<![^\W\d_])' +  # not preceded by a letter
                 ''.join(
                     rf'(?:{re.escape(ch)}\W*)+'
-                    for ch in word
+                    for ch in normalize(word)
                 ) +
                 r'(?![^\W\d_])',     # not followed by a letter
                 re.IGNORECASE

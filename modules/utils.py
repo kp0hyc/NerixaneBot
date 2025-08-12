@@ -46,9 +46,6 @@ async def compute_sha256(bot, file_id):
     data = await bio.download_as_bytearray()
     return hashlib.sha256(data).hexdigest()
 
-def normalize(text):
-    return text.translate(HOMOGLYPHS).lower()
-
 def parse_name(uc):
     if uc.id == TARGET_USER:
         nick = random.choice(TARGET_NICKS)
