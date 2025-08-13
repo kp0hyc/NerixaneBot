@@ -52,7 +52,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
             (msg.sticker or msg.animation or msg.video or msg.document or (msg.photo[-1] if msg.photo else None)).file_id
         )
         
-        block, soft = await is_banned_media(sig, file_id, context.bot)
+        block, ban_type = await is_banned_media(sig, file_id, context.bot)
         if block:
             print("We got blocked media!")
             
@@ -82,7 +82,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     print(f"User {user.id} joined over a month ago — downgrading to soft.")
                     force_soft = True
 
-            if soft or force_soft:
+            if ban_type == "block":
                 try:
                     await context.bot.restrict_chat_member(
                         chat_id=update.effective_chat.id,
@@ -99,7 +99,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 except BadRequest as e:
                     print(f"Failed to restrict media for {user.id}: {e}")
-            else:
+            elif ban_type == "ban" and not force_soft:
                 try:
                     await context.bot.ban_chat_member(update.effective_chat.id, user.id)
                 except BadRequest as e:

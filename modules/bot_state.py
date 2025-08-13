@@ -404,6 +404,36 @@ class BotState:
     def load_banlist(cls):
         with open(BANLIST_FILE, "r", encoding="utf-8") as f:
             cls.banlist = json.load(f)
+        
+        try:
+            with open(BANLIST_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            cls.banlist = []
+            return
+
+        if not isinstance(data, list):
+            raise ValueError("BANLIST_FILE must contain a JSON array of objects.")
+
+        normalized = []
+
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+
+            item = dict(entry)
+
+            if "ban_type" not in item:
+                soft = item.pop("soft", None)
+
+                if soft is None or not soft:
+                    item["ban_type"] = "ban"
+                else:
+                    item["ban_type"] = "block"
+
+            normalized.append(item)
+
+        cls.banlist = normalized
 
     @classmethod
     def save_banlist(cls):

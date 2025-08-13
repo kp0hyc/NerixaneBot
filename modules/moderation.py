@@ -28,14 +28,14 @@ async def is_banned_media(sig: dict, file_id, bot):
     if pack:
         for rule in MyBotState.banlist:
             if rule.get("sticker_set_name") == pack:
-                return True, rule.get("soft", False)
-        return False, False
+                return True, rule.get("ban_type", "delete")
+        return False, ""
 
     uid = sig.get("file_unique_id")
     if uid:
         for rule in MyBotState.banlist:
             if rule.get("file_unique_id") == uid:
-                return True, rule.get("soft", False)
+                return True, rule.get("ban_type", "delete")
 
     meta_keys = ["mime_type", "duration", "width", "height", "file_size"]
     for rule in MyBotState.banlist:
@@ -43,27 +43,30 @@ async def is_banned_media(sig: dict, file_id, bot):
             rule.get(k) is None or rule[k] == sig.get(k)
             for k in meta_keys
         ):
-            return True, rule.get("soft")
+            return True, rule.get("ban_type", "delete")
             rule_hash = rule.get("sha256")
             if not rule_hash:
-                return True, rule.get("soft")
-            
+                return True, rule.get("ban_type", "delete")
+
             try:
                 sig["sha256"] = await compute_sha256(bot, file_id)
             except:
-                return True, rule.get("soft")
+                return True, rule.get("ban_type", "delete")
 
-            return sig["sha256"] == rule_hash, rule.get("soft")
+            return sig["sha256"] == rule_hash, rule.get("ban_type", "delete")
 
     return False, False
 
 async def ban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await add_media_to_block(update, context, False)
+    await add_media_to_block(update, context, "ban")
 
 async def block_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await add_media_to_block(update, context, True)
+    await add_media_to_block(update, context, "block")
 
-async def add_media_to_block(update: Update, context: ContextTypes.DEFAULT_TYPE, soft):
+async def delete_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await add_media_to_block(update, context, "delete")
+
+async def add_media_to_block(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_type):
     user = update.effective_user
     msg  = update.effective_message
 
@@ -123,8 +126,7 @@ async def add_media_to_block(update: Update, context: ContextTypes.DEFAULT_TYPE,
             await msg.reply_text("ℹ️ Этот файл уже в банлисте (по метаданным).")
             return
 
-    if soft:
-        sig["soft"] = True
+    sig["ban_type"] = ban_type
     add_ban_rule(sig)
 
     lines = [

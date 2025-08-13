@@ -62,6 +62,7 @@ def main():
     app.add_handler(CommandHandler("rating", show_rating))
     app.add_handler(CommandHandler("ban", ban_media))
     app.add_handler(CommandHandler("block", block_media))
+    app.add_handler(CommandHandler("delete", delete_media))
     app.add_handler(CommandHandler("unban", unban_media))
     app.add_handler(CommandHandler("shutdown", shutdown_bot))
     app.add_handler(CommandHandler("top", top_command))
