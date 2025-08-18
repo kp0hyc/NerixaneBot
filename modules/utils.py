@@ -191,7 +191,7 @@ async def check_afk_time(bot, user, chat_id):
     print(f"AFK check: prev_dead_td={prev_dead_td}, prev_alive_td={prev_alive_td}")
 
     if delta_dead > CHAT_AFK_TIMEOUT or delta_dead > prev_dead_td:
-        reanimator = parse_name(user) if user else "<i>неизвестный герой</i>"
+        reanimator = parse_alias_name(user) if user else "<i>неизвестный герой</i>"
 
         new_dead_record = delta_dead > prev_dead_td
         new_alive_record = delta_alive > prev_alive_td
@@ -204,7 +204,10 @@ async def check_afk_time(bot, user, chat_id):
             )
             MyBotState.META_INFO["afk_time"] = int(delta_dead.total_seconds())
         else:
-            dead_info = f"⏱ Чат был мёртв {format_duration(delta_dead)}."
+            dead_info = (
+                f"⏱ Чат был мёртв {format_duration(delta_dead)} "
+                f"(текущий рекорд — {format_duration(prev_dead_td)})"
+            )
 
         if new_alive_record:
             alive_info = (
@@ -214,7 +217,10 @@ async def check_afk_time(bot, user, chat_id):
             )
             MyBotState.META_INFO["alive_time"] = int(delta_alive.total_seconds())
         else:
-            alive_info = f"Чат был жив {format_duration(delta_alive)}."
+            alive_info = (
+                f"Чат был жив {format_duration(delta_alive)} "
+                f"(текущий рекорд — {format_duration(prev_alive_td)})"
+            )
 
         reanim_info  = f"💉 Реанимационные мероприятия успешно провёл {reanimator}."
         text = "\n\n".join([dead_info, alive_info, reanim_info])
