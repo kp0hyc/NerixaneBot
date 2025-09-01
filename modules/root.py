@@ -296,7 +296,7 @@ async def broadcast(orig_chat_id, orig_msg_id, text, has_media, bot):
 
         except Forbidden:
             MyBotState.SUBSCRIBERS.remove(subscriber_id)
-            MyBotState.save_subscribers(MyBotState.SUBSCRIBERS)
+            BotState.save_subscribers(MyBotState.SUBSCRIBERS)
             print(f"Removed {subscriber_id}: never initiated conversation")
             try:
                 chat = await bot.get_chat(subscriber_id)
