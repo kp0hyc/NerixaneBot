@@ -80,14 +80,21 @@ async def reset_monthly_social_rating(context: ContextTypes.DEFAULT_TYPE):
 
     dump = {
         str(uid): {
-            "reactor_counts": {str(rid): cnt
-                               for rid, cnt in info["reactor_counts"].items()},
-            "total_reacts":    info["total_reacts"],
-            "additional_chat": info["additional_chat"],
-            "additional_neri": info["additional_neri"],
-            "additional_self": info["additional_self"],
-            "boosts":          info["boosts"],
-            "manual_rating":   info["manual_rating"],
+            "reactor_counts": {
+                str(rid): {
+                    "count":         info_rc["count"],
+                    "value":         info_rc["value"],
+                }
+                for rid, info_rc in info["reactor_counts"].items()
+            },
+            "banned":           info.get("banned", False),
+            "total_reacts":     info.get("total_reacts", 0),
+            "additional_chat":  info.get("additional_chat", 0),
+            "additional_neri":  info.get("additional_neri", 0),
+            "additional_self":  info.get("additional_self", 0),
+            "boosts":           info.get("boosts", 0),
+            "manual_rating":    info.get("manual_rating", 0),
+            "reactor_dates":    info.get("reactor_dates", []),
         }
         for uid, info in MyBotState.social_rating.items()
     }
