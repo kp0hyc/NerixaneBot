@@ -33,7 +33,7 @@ async def unsubscribe(update: Update, context: CallbackContext):
     uid = user.id
     if uid in MyBotState.SUBSCRIBERS:
         MyBotState.SUBSCRIBERS.remove(uid)
-        MyBotState.save_subscribers(MyBotState.SUBSCRIBERS)
+        BotState.save_subscribers(MyBotState.SUBSCRIBERS)
         await update.message.reply_text("⚠️ Вы покинули клуб сталкеров Рыжопеча.")
     else:
         await update.message.reply_text("ℹ️ Так ты и не следил, чел...")

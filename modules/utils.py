@@ -248,7 +248,7 @@ async def subscribe_flow_(
             )
     else:
         MyBotState.SUBSCRIBERS.add(user_id)
-        MyBotState.save_subscribers(MyBotState.SUBSCRIBERS)
+        BotState.save_subscribers(MyBotState.SUBSCRIBERS)
 
         await reply_in_chat("🎉 Поздравляю, теперь ты сталкеришь Рыжопеча!")
         try:
