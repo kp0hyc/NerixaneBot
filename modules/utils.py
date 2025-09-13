@@ -71,6 +71,25 @@ def parse_mention_with_alias(user):
     full_name = parse_alias_name(user)
     return f'<a href="tg://user?id={user.id}">{full_name}</a>'
 
+async def alias_for_uid(bot, uid):
+    print("alias_for_uid: ", uid)
+    if uid is None:
+        return "Неизвестный герой"
+
+    entry = MyBotState.indexed_users.get(uid, None)
+
+    print("entry: ", entry)
+
+    if entry is not None:
+        return entry["alias"]
+
+    try:
+        member = await bot.get_chat_member(ORIG_CHANNEL_ID, uid)
+        return parse_alias_name(member) 
+    except Exception:
+        print("exception in alias_for_uid")
+        return "Неизвестный герой"
+
 def count_total_rating(sr, uid):
     if uid not in sr:
         return 0
@@ -178,6 +197,10 @@ async def check_afk_time(bot, user, chat_id):
     last_time = MyBotState.META_INFO.get("last_message_time", now)
     first_time = MyBotState.META_INFO.get("first_message_time", last_time)
 
+    msgs_current = MyBotState.META_INFO.get("messages_in_current_streak")
+    msgs_record = MyBotState.META_INFO.get("top_streak_messages")
+    user_counts_total  = MyBotState.META_INFO.get("user_message_counts")
+
     delta_dead = now - last_time
     delta_alive = last_time - first_time
 
@@ -222,11 +245,38 @@ async def check_afk_time(bot, user, chat_id):
                 f"(текущий рекорд — {format_duration(prev_alive_td)})"
             )
 
+
+        top3_streak = sorted(user_counts_total.items(), key=lambda kv: kv[1], reverse=True)[:3]
+
+        streak_info = ""
+        if msgs_current > msgs_record:
+            MyBotState.META_INFO["top_streak_messages"] = msgs_current
+            streak_info = f"🏆 Новый рекорд по количеству сообщений за одну «жизнь» — {msgs_current}! Прошлый рекорд сообщений — {msgs_record}."
+        else:
+            streak_info = f"Количество сообщений в прошлой «жизни» — {msgs_current} (текущий рекорд — {msgs_record})."
+
+        top3_text = ""
+        if top3_streak:
+            lines = []
+            for i, (uid, cnt) in enumerate(top3_streak):
+                alias = await alias_for_uid(bot, uid)
+                lines.append(f"{i+1}). {alias} — {cnt} сообщений")
+            top3_text = "Больше всех писали:\n" + "\n".join(lines)
+
         reanim_info  = f"💉 Реанимационные мероприятия успешно провёл {reanimator}."
-        text = "\n\n".join([dead_info, alive_info, reanim_info])
+        text = "\n\n".join([dead_info, alive_info, reanim_info, streak_info, top3_text])
         await bot.send_message(chat_id, text, parse_mode="HTML")
 
+        msgs_current = 0
+        user_counts_total = {}
         MyBotState.META_INFO["first_message_time"] = now
+
+    msgs_current += 1
+
+    user_counts_total[user.id] = user_counts_total.get(user.id, 0) + 1
+
+    MyBotState.META_INFO["messages_in_current_streak"] = msgs_current
+    MyBotState.META_INFO["user_message_counts"] = user_counts_total
 
     MyBotState.META_INFO["last_message_time"] = now
     MyBotState.save_meta_info()

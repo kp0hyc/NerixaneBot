@@ -198,6 +198,17 @@ class BotState:
 
         cls.META_INFO["afk_time"] = data.get("afk_time", 0)
         cls.META_INFO["alive_time"] = data.get("alive_time", 0)
+        
+        cls.META_INFO["messages_in_current_streak"] = data.get("messages_in_current_streak", 0)
+        cls.META_INFO["top_streak_messages"] = data.get("top_streak_messages", 0)
+
+        raw_total = data.get("user_message_counts", {})
+        if isinstance(raw_total, dict):
+            cls.META_INFO["user_message_counts"] = {
+                int(k): int(v) for k, v in raw_total.items()
+            }
+        else:
+            cls.META_INFO["user_message_counts"] = {}
 
         first_ts = data.get("first_message_time")
         if isinstance(first_ts, (int, float)):
@@ -533,6 +544,11 @@ class BotState:
         serializable = {
             "afk_time": cls.META_INFO.get("afk_time", 0),
             "alive_time": cls.META_INFO.get("alive_time", 0),
+            "messages_in_current_streak": cls.META_INFO.get("messages_in_current_streak", 0),
+            "top_streak_messages": cls.META_INFO.get("top_streak_messages", 0),
+            "user_message_counts": {
+                str(k): v for k, v in cls.META_INFO.get("user_message_counts", {}).items()
+            },
             "first_message_time": first_dt.timestamp(),
             "last_message_time":  last_dt.timestamp(),
             "join_bot_time":  join_dt.timestamp(),
