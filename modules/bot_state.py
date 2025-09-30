@@ -29,11 +29,14 @@ GOOGLE_CREDS_PATH = os.environ["GOOGLE_CREDS_PATH"]
 
 ORIG_CHANNEL_ID   = int(os.environ["ORIG_CHANNEL_ID"])
 GAMBLING_CHANNEL_ID   = int(os.environ["GAMBLING_CHANNEL_ID"])
+REPORT_CHANNEL_ID   = int(os.environ["REPORT_CHANNEL_ID"])
 TARGET_USER       = int(os.environ["TARGET_USER"])
 
 BASE_URL          = os.environ["BASE_URL"]
 MY_BOT_USERNAME   = os.environ["MY_BOT_USERNAME"]
 WEB_APP_NAME      = os.environ["WEB_APP_NAME"] 
+
+CASINO_JOIN_LINK  = os.environ["CASINO_JOIN_LINK"]
 
 COCKBOT_USERNAME  = os.environ["COCKBOT_USERNAME"]
 # ────────────────────────────────────────────────────────────────────────────────
@@ -99,7 +102,7 @@ HOMOGLYPHS = {
     ord('m'): 'м', ord('M'): 'м',
     ord('e'): 'е', ord('E'): 'е',
     ord('b'): 'в', ord('B'): 'в',
-    ord('n'): 'п', ord('N'): 'п', ord('u'): 'п', ord('U'): 'п', ord('и'): 'п', ord('И'): 'п', ord('i'): 'п', ord('I'): 'п',
+    ord('n'): 'п', ord('N'): 'п', ord('u'): 'п', ord('U'): 'п',
     ord('r'): 'г', ord('R'): 'г',
     ord('3'): 'з',
     ord('6'): 'б',

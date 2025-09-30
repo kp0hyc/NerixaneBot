@@ -209,6 +209,7 @@ async def handle_cocksize(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
     if user.id != TARGET_USER:
+        await check_report(update, context.bot)
         return
     
     print('we got message!')

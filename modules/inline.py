@@ -26,21 +26,21 @@ RANK_TRACKS = {
         "field": "soc_cur_tot",
         "buckets": [
             {"title": "Изгой",        "min": float("-inf"), "max": -1,   "weight": 5000},
-            {"title": "Новичок",  "min": 0,   "max": 99,  "weight": 450},
-            {"title": "Свой парень",  "min": 100, "max": 499, "weight": 750},
-            {"title": "Авторитет",    "min": 500, "max": 999, "weight": 1000},
-            {"title": "Икона чата",   "min": 1000,"max": float("inf"), "weight": 5000},
+            {"title": "Новичок",      "min": 0,   "max": 499,  "weight": 450},
+            {"title": "Свой парень",  "min": 500, "max": 2499, "weight": 750},
+            {"title": "Авторитет",    "min": 2500, "max": 4999, "weight": 1000},
+            {"title": "Икона чата",   "min": 5000,"max": float("inf"), "weight": 5000},
         ],
     },
 
     "msgs": {
         "field": "total_msgs",
         "buckets": [
-            {"title": "Скорлупа",        "min": 0,   "max": 49,   "weight": 1000},
-            {"title": "Наблюдатель",     "min": 50,  "max": 199,  "weight": 400},
-            {"title": "Труженик чата",   "min": 200, "max": 499,  "weight": 650},
-            {"title": "Почётный спамер", "min": 500, "max": 4999,  "weight": 900},
-            {"title": "Гигасрун",        "min": 5000,"max": float("inf"), "weight": 1000},
+            {"title": "Скорлупа",        "min": 0,   "max": 499,   "weight": 1000},
+            {"title": "Наблюдатель",     "min": 500,  "max": 1999,  "weight": 400},
+            {"title": "Труженик чата",   "min": 2000, "max": 9999,  "weight": 650},
+            {"title": "Почётный спамер", "min": 10000, "max": 29999,  "weight": 900},
+            {"title": "Гигасрун",        "min": 30000,"max": float("inf"), "weight": 1000},
         ],
     },
 
@@ -48,10 +48,10 @@ RANK_TRACKS = {
         "field": "coins",
         "buckets": [
             {"title": "Бомжара должник",      "min": float("-inf"),   "max": -1,    "weight": 8000},
-            {"title": "Дрочер копеек",        "min": 0,   "max": 99,    "weight": 550},
-            {"title": "Копатель сокровищ",    "min": 100,  "max": 999,   "weight": 700},
-            {"title": "Коллекционер рыженки", "min": 1000,  "max": 9999,  "weight": 950},
-            {"title": "Вор казино",           "min": 10000, "max": float("inf"), "weight": 8000},
+            {"title": "Дрочер копеек",        "min": 0,   "max": 4999,    "weight": 550},
+            {"title": "Копатель сокровищ",    "min": 5000,  "max": 49999,   "weight": 700},
+            {"title": "Коллекционер рыженки", "min": 50000,  "max": 499999,  "weight": 950},
+            {"title": "Вор казино",           "min": 500000, "max": float("inf"), "weight": 8000},
         ],
     },
 }

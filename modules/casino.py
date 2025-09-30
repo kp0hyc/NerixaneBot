@@ -274,5 +274,9 @@ async def finalize_giveaway(ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 if cur.rowcount == 0:
                     db.execute("INSERT INTO user (id, coins) VALUES (?, ?)", (uid, coins))
             lines.append(f"• {name}: +{coins} рыженки")
-
-    await ctx.bot.send_message(chat_id=ORIG_CHANNEL_ID, text="\n".join(lines), parse_mode="HTML")
+    
+    lines.append("\n🎉 Спасибо за участие! Потратить вы можете в казино \"ЛАКИ 68\"")
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🎰 Крутануть!", url=CASINO_JOIN_LINK)]]
+    )
+    await ctx.bot.send_message(chat_id=ORIG_CHANNEL_ID, text="\n".join(lines), parse_mode="HTML", reply_markup=keyboard)

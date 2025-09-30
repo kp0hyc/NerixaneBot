@@ -127,7 +127,12 @@ async def build_stats_page_async(mode: str, page: int, bot) -> tuple[str, Inline
             InlineKeyboardButton("Последняя", callback_data=f"stats:{mode}:{last_page}")
         )
 
-    kb = InlineKeyboardMarkup([mode1_buttons, mode2_buttons, nav_buttons])
+    url = f"https://t.me/{MY_BOT_USERNAME}?start=allow_pm"
+    link_buttons = [
+        InlineKeyboardButton("👀 Сталкерить", url=url)
+    ]
+
+    kb = InlineKeyboardMarkup([mode1_buttons, mode2_buttons, nav_buttons, link_buttons])
     return text, kb
 
 async def stats_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

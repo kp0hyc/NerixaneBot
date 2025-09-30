@@ -200,3 +200,36 @@ async def unban_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text(f"✅ Удалено {removed} правил из банлиста.")
     else:
         await msg.reply_text("ℹ️ Не найдено совпадающих правил в банлисте.")
+
+async def check_report(update: Update, bot):
+    msg = update.effective_message
+    if not msg:
+        return
+
+    text = msg.text or msg.caption or ""
+    if not text:
+        return
+    
+    uid = update.effective_user.id
+
+    if MyBotState.message_stats[uid] > 1:
+        return
+
+    orig_chat_id = update.effective_chat.id
+    orig_msg_id  = msg.message_id
+    text = msg.text or msg.caption or ""
+    
+    kb = await make_link_keyboard(orig_chat_id, orig_msg_id, bot)
+
+    print('Forwarding new member msg!')
+    
+    try:
+        await bot.copy_message(
+            chat_id=REPORT_CHANNEL_ID,
+            from_chat_id=orig_chat_id,
+            message_id=orig_msg_id,
+            reply_markup=kb
+        )
+
+    except Exception:
+        print(f"Unexpected error forwarding report message")
