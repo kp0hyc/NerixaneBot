@@ -243,5 +243,24 @@ async def index_users(ctx: CallbackContext) -> None:
 
         except Exception:
             continue
+        
+        timestamp = 1673222400
+        dt = datetime.fromtimestamp(timestamp, tz=TYUMEN)
+        
+        MyBotState.indexed_users[TARGET_USER] = {
+            "name"          : "Nerixane",
+            "total_msgs"    : MyBotState.message_stats.get(TARGET_USER, 0),
+            "daily_msgs"    : MyBotState.daily_stats.get(TARGET_USER, 0),
+            "soc_cur_tot"   : 999999999,
+            "soc_cur_neri"  : 0,
+            "soc_glob_tot"  : 999999999,
+            "soc_glob_neri" : 0,
+            "coins"         : 999999999,
+            "alias"         : "Ваше Рыжейшество",
+            "note"          : "Главный босс этого чата и всей рыженковой империи.",
+            "leave_count"   : 0,
+            "days_in_chat"  : (datetime.now(TYUMEN) - dt).days,
+            "days_since_join": (datetime.now(TYUMEN) - dt).days,
+        }
 
     print(f"✅ Indexed {len(MyBotState.indexed_users)} users.")

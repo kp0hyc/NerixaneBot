@@ -2,6 +2,9 @@ import io
 import matplotlib.pyplot as plt
 
 from .utils import *
+from .updates import *
+
+from telegram.helpers import escape_markdown
 
 from telegram import (
     InputMediaPhoto,
@@ -61,17 +64,21 @@ def create_bet_image_and_text(pid):
     lines = []
     for i, r in enumerate(opts):
         votes = r["total"]
+        opt_text = escape_markdown(r["option"], version=2)
         if votes > 0:
             coef = total_votes / votes
             coef_str = f", коэф.: {coef:.2f}"
         else:
             coef_str = ""
-        lines.append(f"{i+1}. {r['option']} — {votes} рыженки{coef_str}")
+        lines.append(f"{i+1}\\. {opt_text} — {votes} рыженки{coef_str}")
     options_md = "\n".join(lines)
-
-    # 5) Build the caption text
+    
+    q_md = escape_markdown(question, version=2)
+    
+    pid_tag = f"\\(\\#{pid}\\)"
+    
     text = (
-        f"🎲 *{question}* (#{pid})\n\n"
+        f"🎲 *{q_md}* {pid_tag}\n\n"
         f"{options_md}\n\n"
         "Сделай свою ставку, нажав на кнопку ниже:"
     )
@@ -280,3 +287,55 @@ async def finalize_giveaway(ctx: ContextTypes.DEFAULT_TYPE) -> None:
         [[InlineKeyboardButton("🎰 Крутануть!", url=CASINO_JOIN_LINK)]]
     )
     await ctx.bot.send_message(chat_id=ORIG_CHANNEL_ID, text="\n".join(lines), parse_mode="HTML", reply_markup=keyboard)
+
+async def transfer_coins(update: Update, context: CallbackContext):
+    msg = update.effective_message
+    if not msg:
+        return
+
+    reply = update.message.reply_to_message
+    if not reply:
+        await update.message.reply_text(
+            "Ты должен ответить на сообщение нужного чатера\n"
+            "/transfer <N>"
+        )
+        return
+
+    user = update.effective_user
+
+    target = reply.from_user
+    target_id = target.id
+    display_name = parse_mention_with_alias(target)
+
+    if not context.args:
+        await update.message.reply_text("❌ Ты должен указать количество рыженки, например /transfer 100")
+        return
+
+    diff_str = context.args[0]
+    try:
+        diff = int(diff_str)
+    except ValueError:
+        await update.message.reply_text("❌ Вторым аргументом должно быть число.")
+        return
+    
+    if diff < 1:
+        await update.message.reply_text("❌ Что за попытка скама, вы должны ввести позитивное число!")
+        return
+    if user.id == target_id:
+        await update.message.reply_text("❌ Нельзя перевести самому себе!")
+        return
+
+    with db:
+        row = db.execute(
+            "SELECT coins FROM user WHERE id = ?",
+            (user.id,)
+        ).fetchone()
+        current = row["coins"] if row else 0
+        if current < diff:
+            await update.message.reply_text("❌ У тебя нет столько рыженки!")
+            return
+    update_coins(user.id, -diff)
+    update_coins(target_id, diff)
+
+    await update.message.reply_text(f"✅ {display_name} получил {diff} рыженки",
+    parse_mode="HTML")

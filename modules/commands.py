@@ -356,7 +356,7 @@ async def start_bet(update: Update, context: CallbackContext):
         photo=buf,
         caption=text,
         reply_markup=kb,
-        parse_mode="Markdown"
+        parse_mode="MarkdownV2"
     )
     
     with db:

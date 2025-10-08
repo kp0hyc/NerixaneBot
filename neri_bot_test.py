@@ -83,6 +83,7 @@ def main():
     app.add_handler(CommandHandler("stop_ignore_bot", stop_ignore_bot))
     app.add_handler(CommandHandler("set_alias", set_alias))
     app.add_handler(CommandHandler("set_note", set_note))
+    app.add_handler(CommandHandler("transfer", transfer_coins))
 
     app.add_handler(InlineQueryHandler(inline_query))
     
